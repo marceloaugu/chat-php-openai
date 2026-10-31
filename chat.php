@@ -77,21 +77,23 @@ $history = array_reverse($stmt_hist->fetchAll());
 $think_param = $_POST['think'] ?? '1';
 $think_enabled = ($think_param === '1' || $think_param === 'true');
 
-// Identifica se é modelo da família de raciocínio (o1, o3, deepseek-r1)
-$is_o_series = (bool)preg_match('/^(o1|o3)/i', $model);
-$is_reasoning_model = $is_o_series || (stripos($model, 'r1') !== false) || (stripos($model, 'reasoner') !== false);
+// Identifica se é modelo da família de raciocínio (o1, o3, o4, deepseek-r1, qwen3/qwq)
+$is_o_series = (bool)preg_match('/^(o1|o3|o4)/i', $model);
+$is_qwen_reasoning = (stripos($model, 'qwen3') !== false) || (stripos($model, 'qwen-3') !== false) || (stripos($model, 'qwq') !== false);
+$is_reasoning_model = $is_o_series || $is_qwen_reasoning || (stripos($model, 'r1') !== false) || (stripos($model, 'reasoner') !== false) || (stripos($model, 'reasoning') !== false) || (stripos($model, 'thinking') !== false);
 
 // 5. Montar as mensagens para a API OpenAI
 $messages = [];
 // Modelos o1/o3 utilizam papel 'developer', outros utilizam 'system'
 $system_role = $is_o_series ? 'developer' : 'system';
+$qwen_switch = ($is_qwen_reasoning && !$think_enabled) ? " /no_think" : "";
 
 if (!empty($context_extra)) {
-    $messages[] = ["role" => $system_role, "content" => "Você é um assistente útil. Use estas " . $context_extra];
+    $messages[] = ["role" => $system_role, "content" => "Você é um assistente útil. Use estas " . $context_extra . $qwen_switch];
 } else if ($think_enabled) {
     $messages[] = ["role" => $system_role, "content" => "Você é um assistente prestativo e inteligente."];
 } else {
-    $messages[] = ["role" => $system_role, "content" => "Você é um assistente útil e direto ao ponto. Responda de forma concisa e sem raciocínio prévio."];
+    $messages[] = ["role" => $system_role, "content" => "Você é um assistente útil e direto ao ponto. Responda de forma concisa e sem raciocínio prévio." . $qwen_switch];
 }
 
 foreach ($history as $msg) {
@@ -178,8 +180,8 @@ $processLine = function($rawLine) use (
 
             $delta = $json['choices'][0]['delta'];
 
-            // Suporte para pensamento / raciocínio (OpenAI-compatible / DeepSeek / Ollama / o1 / o3)
-            $think_chunk = $delta['reasoning_content'] ?? $delta['reasoning'] ?? $delta['thought'] ?? '';
+            // Suporte para pensamento / raciocínio (OpenAI-compatible / DeepSeek / Ollama / Qwen / o1 / o3)
+            $think_chunk = $delta['reasoning_content'] ?? $delta['reasoning'] ?? $delta['thought'] ?? $delta['thinking'] ?? '';
             if ($think_chunk !== '') {
                 $full_thinking .= $think_chunk;
                 $streamed_tokens_count++;
@@ -375,11 +377,14 @@ if ($final_metrics === null && ($full_content !== '' || $full_thinking !== '')) 
 // 7. Salva a resposta da IA no banco de dados
 $full_response = "";
 if (!empty($full_thinking)) {
-    if (strpos($full_content, '<think>') === false) {
+    if (stripos($full_content, '<think>') === false && stripos($full_content, '</think>') === false) {
         $full_response = "<think>\n" . trim($full_thinking) . "\n</think>\n\n" . $full_content;
     } else {
         $full_response = $full_content;
     }
+} elseif (stripos($full_content, '<think>') === false && stripos($full_content, '</think>') !== false) {
+    // Caso o servidor já tenha incluído <think> no template de prompt e emitido apenas ...</think>
+    $full_response = "<think>\n" . ltrim($full_content);
 } else {
     $full_response = $full_content;
 }

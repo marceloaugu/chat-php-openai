@@ -2,6 +2,7 @@ let currentConversationId = null;
 let currentAbortController = null;
 let currentTypewriterTask = null;
 let installedModelsGlobal = [];
+let serverModelsMeta = {};
 let reasoningEnabled = localStorage.getItem('reasoningEnabled') !== 'false'; // Padrão: ativado
 
 const TARGET_MODELS = [
@@ -12,28 +13,51 @@ const TARGET_MODELS = [
     { name: 'o1-mini', id: 'o1-mini', reasoning: true },
     { name: 'GPT-4 Turbo', id: 'gpt-4-turbo', reasoning: false },
     { name: 'GPT-3.5 Turbo', id: 'gpt-3.5-turbo', reasoning: false },
-    { name: 'DeepSeek-R1 (OpenAI/Local)', id: 'deepseek-r1:8b', reasoning: true }
+    { name: 'DeepSeek-R1 (OpenAI/Local)', id: 'deepseek-r1:8b', reasoning: true },
+    { name: 'Qwen 3 / 3.6 (Reasoning)', id: 'qwen36', reasoning: true }
 ];
 
 function isReasoningModel(modelId) {
     if (!modelId) return false;
     const name = modelId.toLowerCase().trim();
-    
-    // Verifica explicitamente na lista pré-configurada
+
+    // 1. Verifica metadados retornados diretamente pelo servidor em /v1/models (ex: Pantheon / vLLM / Ollama)
+    const meta = serverModelsMeta[modelId] || serverModelsMeta[name];
+    if (meta && typeof meta === 'object') {
+        if (
+            meta.tool_choice_required_with_thinking === true ||
+            meta.thinking === true ||
+            meta.reasoning === true ||
+            meta.supports_thinking === true ||
+            meta.supports_reasoning === true ||
+            (meta.capabilities && (meta.capabilities.thinking === true || meta.capabilities.reasoning === true))
+        ) {
+            return true;
+        }
+    }
+
+    // 2. Verifica explicitamente na lista pré-configurada
     const target = TARGET_MODELS.find(t => t.id.toLowerCase() === name || t.id.toLowerCase().replace(/:latest$/, '') === name.replace(/:latest$/, ''));
     if (target && typeof target.reasoning === 'boolean') {
         return target.reasoning;
     }
-    
-    // Padrões conhecidos de modelos com raciocínio integrado (OpenAI o1/o3 e compatíveis como DeepSeek-R1)
+
+    // 3. Padrões conhecidos de modelos com raciocínio integrado (OpenAI o1/o3/o4, DeepSeek-R1, Qwen3/QwQ, etc.)
     return name.startsWith('o1') ||
            name.startsWith('o3') ||
+           name.startsWith('o4') ||
            name.includes('deepseek-r1') ||
+           name.includes('qwen3') ||
+           name.includes('qwen-3') ||
            name.includes('qwq') ||
            name.includes('marco-o1') ||
+           name.includes('phi-4-reasoning') ||
+           name.includes('glm-z1') ||
+           name.includes('cogito') ||
            name.includes('reasoner') ||
            name.includes('reasoning') ||
-           /\bo[13]\b/.test(name) ||
+           name.includes('thinking') ||
+           /\bo[134]\b/.test(name) ||
            /\br1\b/.test(name);
 }
 
@@ -242,27 +266,35 @@ async function selectChat(id) {
 }
 
 function parseThoughtAndContent(rawText) {
-    if (!rawText) return { thought: '', content: '', hasThought: false };
+    if (!rawText) return { thought: '', content: '', hasThought: false, isOpen: false };
     
-    // Suporte para tags <think>...</think>
+    // 1. Suporte para tags completas <think>...</think>
     const thinkRegex = /<think>([\s\S]*?)<\/think>/i;
     const match = rawText.match(thinkRegex);
     if (match) {
         const thought = match[1].trim();
         const content = rawText.replace(thinkRegex, '').trim();
-        return { thought, content, hasThought: true };
+        return { thought, content, hasThought: true, isOpen: false };
+    }
+
+    // 2. Suporte para quando o servidor já incluiu <think> no template de prompt e emite apenas ...</think>
+    if (!/<think>/i.test(rawText) && /<\/think>/i.test(rawText)) {
+        const closeIdx = rawText.search(/<\/think>/i);
+        const thought = rawText.slice(0, closeIdx).trim();
+        const content = rawText.slice(closeIdx).replace(/^<\/think>/i, '').trim();
+        return { thought, content, hasThought: true, isOpen: false };
     }
     
-    // Suporte para tag <think> ainda aberta
+    // 3. Suporte para tag <think> ainda aberta durante o streaming
     const openThinkRegex = /<think>([\s\S]*)$/i;
     const openMatch = rawText.match(openThinkRegex);
     if (openMatch) {
         const thought = openMatch[1].trim();
         const content = rawText.replace(openThinkRegex, '').trim();
-        return { thought, content, hasThought: true };
+        return { thought, content, hasThought: true, isOpen: true };
     }
     
-    return { thought: '', content: rawText, hasThought: false };
+    return { thought: '', content: rawText, hasThought: false, isOpen: false };
 }
 
 function toggleThought(headerEl) {
@@ -724,8 +756,8 @@ async function enviar() {
                         if (json.choices && json.choices.length > 0 && json.choices[0].delta) {
                             const delta = json.choices[0].delta;
                             
-                            // A) Raciocínio (DeepSeek-R1 / o1 / o3 / Qwen)
-                            const thinkChunk = delta.reasoning_content || delta.reasoning || delta.thought || '';
+                            // A) Raciocínio explícito no delta (DeepSeek-R1 / o1 / o3 / Qwen / Pantheon)
+                            const thinkChunk = delta.reasoning_content || delta.reasoning || delta.thought || delta.thinking || '';
                             if (thinkChunk) {
                                 if (!firstTokenTime) firstTokenTime = performance.now();
                                 if (!isThinking) {
@@ -760,7 +792,7 @@ async function enviar() {
                                 }
                             }
 
-                            // B) Conteúdo principal da resposta
+                            // B) Conteúdo principal da resposta (com suporte a <think>...</think> mesmo fragmentado entre tokens)
                             const contentChunk = delta.content || '';
                             if (contentChunk) {
                                 if (!firstTokenTime) firstTokenTime = performance.now();
@@ -778,32 +810,41 @@ async function enviar() {
                                     }
                                 }
 
-                                if (contentChunk.includes('<think>') || inEmbeddedThink) {
+                                if (contentChunk.includes('<think>') || contentChunk.includes('</think>') || inEmbeddedThink) {
                                     let processChunk = contentChunk;
                                     if (processChunk.includes('<think>')) {
                                         inEmbeddedThink = true;
                                         isThinking = true;
                                         hasThought = true;
-                                        thinkingStartTime = performance.now();
+                                        if (!thinkingStartTime) thinkingStartTime = performance.now();
                                         const thoughtEl = aiMsgDiv.querySelector('.thought-container');
                                         if (thoughtEl) {
                                             thoughtEl.style.display = 'block';
                                             thoughtEl.classList.remove('is-collapsed');
                                             thoughtEl.classList.add('is-thinking');
                                         }
-                                        const parts = processChunk.split('<think>');
+                                        const parts = processChunk.split(/<think>/i);
                                         fullAiContent += parts[0];
-                                        processChunk = parts[1] || '';
+                                        processChunk = parts.slice(1).join('');
                                     }
                                     if (processChunk.includes('</think>')) {
+                                        const parts = processChunk.split(/<\/think>/i);
+                                        if (!inEmbeddedThink && fullAiThinking === '') {
+                                            // Caso o servidor tenha aberto <think> no template de prompt e emitido apenas ...</think>
+                                            fullAiThinking = (fullAiContent + parts[0]).trim();
+                                            fullAiContent = parts.slice(1).join('');
+                                            displayedContent = "";
+                                        } else {
+                                            fullAiThinking += parts[0];
+                                            fullAiContent += parts.slice(1).join('');
+                                        }
                                         inEmbeddedThink = false;
                                         isThinking = false;
-                                        const parts = processChunk.split('</think>');
-                                        fullAiThinking += parts[0];
-                                        fullAiContent += parts[1] || '';
+                                        hasThought = true;
 
                                         const thoughtEl = aiMsgDiv.querySelector('.thought-container');
                                         if (thoughtEl) {
+                                            thoughtEl.style.display = 'block';
                                             thoughtEl.classList.remove('is-thinking');
                                             const dur = ((performance.now() - (thinkingStartTime || streamStartTime)) / 1000).toFixed(1);
                                             const statusEl = thoughtEl.querySelector('.thought-status');
@@ -900,6 +941,25 @@ async function enviar() {
                     if (statusEl) statusEl.innerText = `Pensou por ${dur}s`;
                     const timerEl = thoughtEl.querySelector('.thought-timer');
                     if (timerEl) timerEl.style.display = 'none';
+                }
+            }
+
+            // Caso tags <think>...</think> tenham vindo fragmentadas entre tokens durante o stream
+            if (fullAiContent !== "" && (/<think>/i.test(fullAiContent) || /<\/think>/i.test(fullAiContent))) {
+                const parsedFinal = parseThoughtAndContent(fullAiContent);
+                if (parsedFinal.hasThought) {
+                    if (parsedFinal.thought) {
+                        fullAiThinking = fullAiThinking ? (fullAiThinking + "\n" + parsedFinal.thought) : parsedFinal.thought;
+                    }
+                    fullAiContent = parsedFinal.content;
+                    const thoughtEl = aiMsgDiv.querySelector('.thought-container');
+                    if (thoughtEl) {
+                        thoughtEl.style.display = 'block';
+                        thoughtEl.classList.remove('is-thinking');
+                        const dur = ((performance.now() - (thinkingStartTime || streamStartTime)) / 1000).toFixed(1);
+                        const statusEl = thoughtEl.querySelector('.thought-status');
+                        if (statusEl) statusEl.innerText = `Pensou por ${dur}s`;
+                    }
                 }
             }
 
@@ -1024,6 +1084,16 @@ async function fetchModels() {
         const select = document.getElementById('model-select');
         
         const modelsList = data.data || data.models || [];
+        serverModelsMeta = {};
+        modelsList.forEach(m => {
+            if (m && typeof m === 'object') {
+                const id = m.id || m.name;
+                if (id) {
+                    serverModelsMeta[id] = m;
+                    serverModelsMeta[id.toLowerCase().trim()] = m;
+                }
+            }
+        });
         const availableModelIds = modelsList.map(m => m.id || m.name || m);
         installedModelsGlobal = availableModelIds;
         
