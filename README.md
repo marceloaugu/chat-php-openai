@@ -1,4 +1,4 @@
-# 💬 chat-openai
+# 💬 chat-php-openai
 
 Interface web de chat em **PHP**, **JavaScript (ES6+)** e **Vanilla CSS** projetada para experimentação, avaliação e uso de modelos de linguagem (LLMs) por meio de APIs compatíveis com o padrão **OpenAI** (`/v1/chat/completions` e `/v1/models`).
 
@@ -8,7 +8,7 @@ Este projeto integra uma linha de experimentação em PHP voltada à execução 
 
 ## 1. Apresentação
 
-O **`chat-openai`** disponibiliza uma interface leve, responsiva e sem dependências de frameworks pesados para interagir com modelos de linguagem locais ou remotos. O foco do projeto é oferecer:
+O **`chat-php-openai`** disponibiliza uma interface leve, responsiva e sem dependências de frameworks pesados para interagir com modelos de linguagem locais ou remotos. O foco do projeto é oferecer:
 
 * Streaming de tokens em tempo real via **Server-Sent Events (SSE)**.
 * Suporte nativo à visualização de cadeias de raciocínio (*Chain-of-Thought* / *Reasoning*), recolhíveis na interface.
@@ -70,7 +70,7 @@ Não há uma camada formal de adaptadores para múltiplos protocolos distintos; 
 ### Estrutura de Diretórios e Arquivos
 
 ```text
-chat-openai/
+chat-php-openai/
 ├── .env.example        # Modelo de variáveis de ambiente (sem credenciais reais)
 ├── .gitignore          # Regras de proteção de credenciais, dumps e arquivos locais
 ├── Dockerfile          # Imagem Docker (PHP 8.4 + Apache + pdo_mysql + curl)
@@ -117,8 +117,8 @@ chat-openai/
 
 1. Clone o repositório no diretório do seu servidor web (ex.: `htdocs`):
    ```bash
-   git clone https://github.com/marceloaugu/chat-openai.git
-   cd chat-openai
+   git clone https://github.com/marceloaugu/chat-php-openai.git
+   cd chat-php-openai
    ```
 
 2. Crie o arquivo `.env` a partir do arquivo de exemplo `.env.example`:
@@ -188,7 +188,7 @@ A configuração é realizada por variáveis de ambiente lidas diretamente pelo 
 1. Certifique-se de que o Apache, o MySQL/MariaDB e o servidor de inferência compatível com OpenAI estejam em execução.
 2. Acesse no navegador:
    ```text
-   http://localhost/chat-openai/
+   http://localhost/chat-php-openai/
    ```
 3. Verifique no canto inferior esquerdo da barra lateral se o indicador apresenta **Online** acompanhado do endereço do endpoint configurado.
 4. Selecione o modelo desejado no menu superior (os modelos retornados por `/v1/models` aparecem sob o grupo **Modelos Disponíveis na API**) e envie sua mensagem.
@@ -208,7 +208,7 @@ A configuração é realizada por variáveis de ambiente lidas diretamente pelo 
 
 Este projeto opera sobre a **especificação de API compatível com OpenAI (`/v1`)** no backend (`api.php` e `chat.php`), funcionando de forma transparente com qualquer servidor de inferência que implemente esse contrato — inclusive o **Ollama** quando configurado através do seu endpoint compatível (`/v1`).
 
-| Característica | Especificação Implementada (`chat-openai`) |
+| Característica | Especificação Implementada (`chat-php-openai`) |
 | :--- | :--- |
 | **Endpoint de Chat** | `POST {OPENAI_BASE_URL}/chat/completions` |
 | **Listagem de Modelos** | `GET {OPENAI_BASE_URL}/models` (com fallback para `/health` e `/models`) |
