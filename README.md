@@ -1,8 +1,8 @@
 # 💬 chat-php-openai
 
-Interface web de chat em **PHP**, **JavaScript (ES6+)** e **Vanilla CSS** projetada para experimentação, avaliação e uso de modelos de linguagem (LLMs) por meio de APIs compatíveis com o padrão **OpenAI** (`/v1/chat/completions` e `/v1/models`).
+Interface web de chat em **PHP**, **JavaScript (ES6+)** e **Vanilla CSS** projetada para integração com modelos de linguagem (LLMs) por meio de APIs compatíveis com o padrão **OpenAI** (`/v1/chat/completions` e `/v1/models`).
 
-Este projeto integra uma linha de experimentação em PHP voltada à execução de LLMs em servidores locais equipados com GPUs **NVIDIA Tesla K80** (arquitetura **Kepler**, Compute Capability **SM 3.7**), mantendo compatibilidade configurável com qualquer servidor ou provedor que implemente a especificação de API compatível com OpenAI (inclusive o **Ollama** nessa configuração `/v1`).
+O projeto mantém compatibilidade configurável com a API oficial da **OpenAI** e com qualquer servidor ou provedor local/remoto que implemente a especificação de API compatível com OpenAI (como **Ollama**, **vLLM**, **llama.cpp** e **LM Studio** na rota `/v1`).
 
 ---
 
@@ -16,26 +16,12 @@ O **`chat-php-openai`** disponibiliza uma interface leve, responsiva e sem depen
 * Persistência de histórico de conversas, modelos utilizados e métricas de execução em banco de dados **MySQL / MariaDB**, com criação e migração automática de esquema.
 * Recuperação de contexto local simplificada (**RAG por palavras-chave**) sobre o histórico da própria conversa.
 
-### Resultados Observados no Ambiente de Testes (Referência)
-
-No laboratório local de experimentação, este projeto foi validado em um servidor local compatível com a API OpenAI sob a seguinte configuração:
-
-| Componente / Parâmetro | Especificação do Ambiente de Testes |
-| :--- | :--- |
-| **Interface de Inferência** | API local compatível com OpenAI (`/v1` na porta `8081`) |
-| **Hardware GPU** | 2x NVIDIA Tesla K80 (Arquitetura Kepler, Compute Capability **SM 3.7**) |
-| **Modelo Testado** | `Qwen3.6-35B-A3B` (arquitetura *Mixture-of-Experts* / MoE) |
-| **Modo de Inferência** | Raciocínio (*Reasoning / Chain-of-Thought*) ativado |
-| **Desempenho Observado** | Aproximadamente **20 tokens por segundo (`~20 tok/s`)** |
-
-> **Nota técnica:** Os números acima registram o resultado empírico obtido no ambiente de referência com o modelo e hardware citados, não devendo ser interpretados como garantia de desempenho em configurações de hardware, quantizações ou tamanhos de contexto distintos.
-
 ---
 
 ## 2. Objetivos
 
-1. **Experimentação em Hardware Legado (Kepler / SM 3.7):** Viabilizar uma camada de apresentação rápida em PHP para testar inferência acelerada por GPU em placas NVIDIA Tesla K80.
-2. **Padronização sobre o Protocolo OpenAI (`/v1`):** Consumir os endpoints `/v1/chat/completions` e `/v1/models` de modo que o mesmo código PHP possa conversar com a API remota da OpenAI, com o Ollama (`/v1`) ou com outros servidores locais compatíveis apenas alterando variáveis de ambiente.
+1. **Simplicidade e Leveza em PHP:** Disponibilizar uma camada de apresentação rápida e direta em PHP puro (sem necessidade de Composer ou frameworks complexos), fácil de hospedar em qualquer ambiente Apache/Nginx com MySQL/MariaDB.
+2. **Padronização sobre o Protocolo OpenAI (`/v1`):** Consumir os endpoints `/v1/chat/completions` e `/v1/models` de modo que o mesmo código PHP possa conversar com a API remota da OpenAI, com o Ollama (`/v1`) ou com outros servidores compatíveis apenas alterando variáveis de ambiente.
 3. **Observabilidade de Inferência:** Medir na própria interface de chat a taxa de geração (`tok/s`), a latência e o volume de tokens gerados a cada turno, armazenando essas métricas no banco de dados para comparação entre modelos.
 4. **Inspeção de Raciocínio (*Thinking*):** Separar visualmente o fluxo de pensamento interno do modelo (`reasoning_content`, `reasoning`, `thought` ou blocos `<think>...</think>`) da resposta final apresentada ao usuário.
 
@@ -222,11 +208,11 @@ Este projeto opera sobre a **especificação de API compatível com OpenAI (`/v1
 | :--- | :--- | :--- | :--- |
 | **OpenAI Remota** | `https://api.openai.com/v1` | **Compatível mediante configuração** | Basta configurar `OPENAI_BASE_URL` e `OPENAI_API_KEY`. Suporta `Bearer` token, `stream_options.include_usage`, papel `developer` e `reasoning_effort`. |
 | **Ollama (API `/v1`)** | `http://127.0.0.1:11434/v1` | **Compatível mediante configuração** | Funciona diretamente utilizando a camada de compatibilidade OpenAI do Ollama (`/v1/chat/completions` e `/v1/models`). |
-| **vLLM / llama.cpp (`llama-server`) / LM Studio / Local** | `http://<host>:<porta>/v1` | **Implementado e testado** | Validado em servidor local (`:8081`) com 2x Tesla K80 (SM 3.7) e `Qwen3.6-35B-A3B` a ~20 tok/s. Inclui fallback de status em `/health` e `/models`. |
+| **vLLM / llama.cpp (`llama-server`) / LM Studio / Local** | `http://<host>:<porta>/v1` | **Compatível mediante configuração** | Suporta qualquer servidor compatível com o contrato `/v1`, incluindo fallback de verificação de status em `/health` e `/models`. |
 
 ---
 
-## 10. Exemplos de Uso (Requisições e Respostas Reais)
+## 10. Exemplos de Uso (Requisições e Respostas)
 
 ### 1. Verificação de Status e Modelos (`GET /v1/models`)
 
@@ -234,7 +220,7 @@ Quando a página é carregada, `api.php?action=list_models` consulta `GET {OPENA
 
 ```http
 GET /v1/models HTTP/1.1
-Host: 127.0.0.1:8081
+Host: api.openai.com
 Content-Type: application/json
 ```
 
@@ -245,10 +231,10 @@ Resposta esperada do servidor compatível com OpenAI:
   "object": "list",
   "data": [
     {
-      "id": "Qwen3.6-35B-A3B",
+      "id": "gpt-4o",
       "object": "model",
       "created": 1730000000,
-      "owned_by": "local"
+      "owned_by": "openai"
     }
   ]
 }
@@ -260,7 +246,7 @@ Gerada por `chat.php` ao enviar uma mensagem:
 
 ```json
 {
-  "model": "Qwen3.6-35B-A3B",
+  "model": "deepseek-r1",
   "messages": [
     {
       "role": "system",
@@ -268,7 +254,7 @@ Gerada por `chat.php` ao enviar uma mensagem:
     },
     {
       "role": "user",
-      "content": "Explique a arquitetura Kepler SM 3.7 da Tesla K80."
+      "content": "Explique como funciona o streaming via Server-Sent Events (SSE)."
     }
   ],
   "stream": true,
@@ -281,9 +267,9 @@ Gerada por `chat.php` ao enviar uma mensagem:
 ### 3. Fluxo de Resposta SSE Processado por `chat.php` e `script.js`
 
 ```text
-data: {"id":"chatcmpl-1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"Analisando as especificações da GPU NVIDIA Tesla K80 (GK210)..."},"finish_reason":null}]}
+data: {"id":"chatcmpl-1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"Estruturando a explicação sobre o protocolo HTTP e eventos unidirecionais..."},"finish_reason":null}]}
 
-data: {"id":"chatcmpl-1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"A **NVIDIA Tesla K80** utiliza dois chips GK210 baseados na arquitetura **Kepler (SM 3.7)**..."},"finish_reason":null}]}
+data: {"id":"chatcmpl-1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"O **Server-Sent Events (SSE)** permite que o servidor envie atualizações contínuas ao navegador por uma única conexão HTTP..."},"finish_reason":null}]}
 
 data: {"id":"chatcmpl-1","object":"chat.completion.chunk","choices":[],"usage":{"prompt_tokens":34,"completion_tokens":180,"total_tokens":214}}
 
