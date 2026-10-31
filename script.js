@@ -803,12 +803,22 @@ async function checkServiceStatus() {
         const dot = document.getElementById('status-dot');
         const text = document.getElementById('status-text');
 
+        let endpointLabel = 'API OpenAI';
+        if (data.base_url) {
+            try {
+                const u = new URL(data.base_url);
+                endpointLabel = u.port ? `${u.hostname}:${u.port}` : u.hostname;
+            } catch (_) {
+                endpointLabel = data.base_url;
+            }
+        }
+
         if (data.online) {
             dot.className = 'status-dot online';
-            text.innerHTML = 'Online <span style="font-size: 11px; opacity: 0.8; margin-left: 5px;">• Servidor (:8081)</span>';
+            text.innerHTML = `Online <span style="font-size: 11px; opacity: 0.8; margin-left: 5px;">• ${endpointLabel}</span>`;
         } else {
             dot.className = 'status-dot offline';
-            text.innerHTML = 'Offline <span style="font-size: 11px; opacity: 0.8; margin-left: 5px;">• Porta 8081</span>';
+            text.innerHTML = `Offline <span style="font-size: 11px; opacity: 0.8; margin-left: 5px;">• ${endpointLabel}</span>`;
         }
     } catch (e) {
         const dot = document.getElementById('status-dot');
@@ -830,10 +840,10 @@ async function fetchModels() {
         
         select.innerHTML = '';
 
-        // 1. Modelos detectados da API local (porta 8081)
+        // 1. Modelos detectados na API configurada
         if (availableModelIds.length > 0) {
             const serverGroup = document.createElement('optgroup');
-            serverGroup.label = "Modelos Ativos no Servidor (:8081)";
+            serverGroup.label = "Modelos Disponíveis na API";
             availableModelIds.forEach(m => {
                 const opt = document.createElement('option');
                 opt.value = m;
@@ -869,7 +879,7 @@ async function fetchModels() {
         updateReasoningUI();
     } catch (e) {
         console.error("Erro ao buscar modelos:", e);
-        document.getElementById('model-select').innerHTML = '<option value="default">Padrão (:8081)</option>';
+        document.getElementById('model-select').innerHTML = '<option value="default">Padrão (API)</option>';
         updateReasoningUI();
     }
 }
