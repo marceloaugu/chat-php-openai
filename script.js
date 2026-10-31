@@ -108,10 +108,116 @@ async function loadHistory() {
     data.forEach(chat => {
         const item = document.createElement('div');
         item.className = `history-item ${chat.id == currentConversationId ? 'active' : ''}`;
-        item.innerText = chat.title;
         item.onclick = () => selectChat(chat.id);
+
+        const titleSpan = document.createElement('span');
+        titleSpan.className = 'history-title';
+        titleSpan.innerText = chat.title || 'Nova Conversa';
+        titleSpan.title = chat.title || 'Nova Conversa';
+        item.appendChild(titleSpan);
+
+        const actionsDiv = document.createElement('div');
+        actionsDiv.className = 'history-actions';
+
+        const renameBtn = document.createElement('button');
+        renameBtn.type = 'button';
+        renameBtn.className = 'history-action-btn rename';
+        renameBtn.title = 'Renomear conversa';
+        renameBtn.innerHTML = '<i class="fa-solid fa-pen"></i>';
+        renameBtn.onclick = (e) => {
+            e.stopPropagation();
+            startRenameChat(chat.id, chat.title || 'Nova Conversa', item, titleSpan);
+        };
+
+        const deleteBtn = document.createElement('button');
+        deleteBtn.type = 'button';
+        deleteBtn.className = 'history-action-btn delete';
+        deleteBtn.title = 'Excluir conversa';
+        deleteBtn.innerHTML = '<i class="fa-solid fa-trash"></i>';
+        deleteBtn.onclick = (e) => {
+            e.stopPropagation();
+            deleteChat(chat.id, chat.title || 'Nova Conversa');
+        };
+
+        actionsDiv.appendChild(renameBtn);
+        actionsDiv.appendChild(deleteBtn);
+        item.appendChild(actionsDiv);
+
         list.appendChild(item);
     });
+}
+
+function startRenameChat(chatId, currentTitle, itemEl, titleSpan) {
+    if (itemEl.querySelector('.history-rename-input')) return;
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'history-rename-input';
+    input.value = currentTitle;
+
+    const actionsDiv = itemEl.querySelector('.history-actions');
+    if (actionsDiv) actionsDiv.style.display = 'none';
+    titleSpan.style.display = 'none';
+
+    itemEl.insertBefore(input, titleSpan);
+    input.focus();
+    input.select();
+
+    let finished = false;
+    const finishRename = async (save) => {
+        if (finished) return;
+        finished = true;
+        const newTitle = input.value.trim();
+        if (save && newTitle && newTitle !== currentTitle) {
+            try {
+                await fetch('api.php?action=rename_conversation', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: `conversation_id=${encodeURIComponent(chatId)}&title=${encodeURIComponent(newTitle)}`
+                });
+            } catch (err) {
+                console.error('Erro ao renomear conversa:', err);
+            }
+        }
+        loadHistory();
+    };
+
+    input.onclick = (e) => e.stopPropagation();
+    input.onkeydown = (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            finishRename(true);
+        } else if (e.key === 'Escape') {
+            e.preventDefault();
+            finishRename(false);
+        }
+    };
+    input.onblur = () => finishRename(true);
+}
+
+async function deleteChat(chatId, title) {
+    if (!confirm(`Deseja realmente excluir a conversa "${title}"?`)) return;
+    try {
+        await fetch('api.php?action=delete_conversation', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: `conversation_id=${encodeURIComponent(chatId)}`
+        });
+
+        if (currentConversationId == chatId) {
+            const res = await fetch('api.php?action=list_conversations');
+            const remaining = await res.json();
+            if (remaining.length > 0) {
+                await selectChat(remaining[0].id);
+            } else {
+                await createNewChat();
+            }
+        } else {
+            loadHistory();
+        }
+    } catch (err) {
+        console.error('Erro ao excluir conversa:', err);
+    }
 }
 
 async function selectChat(id) {
@@ -171,16 +277,35 @@ function applyCodeBlockFeatures(container) {
         if (code && !pre.parentElement.classList.contains('code-wrapper')) {
             hljs.highlightElement(code);
 
+            let lang = 'código';
+            code.classList.forEach(cls => {
+                if (cls.startsWith('language-')) {
+                    lang = cls.replace('language-', '');
+                }
+            });
+
             const wrapper = document.createElement('div');
             wrapper.className = 'code-wrapper';
-            pre.parentNode.insertBefore(wrapper, pre);
-            wrapper.appendChild(pre);
+
+            const header = document.createElement('div');
+            header.className = 'code-header';
+
+            const langLabel = document.createElement('span');
+            langLabel.className = 'code-lang';
+            langLabel.innerText = lang;
 
             const btn = document.createElement('button');
+            btn.type = 'button';
             btn.className = 'copy-btn';
-            btn.innerHTML = '<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z"></path><path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"></path></svg> Copiar';
+            btn.innerHTML = '<i class="fa-regular fa-copy"></i> Copiar código';
             btn.onclick = () => copyToClipboard(code.innerText, btn);
-            wrapper.appendChild(btn);
+
+            header.appendChild(langLabel);
+            header.appendChild(btn);
+
+            pre.parentNode.insertBefore(wrapper, pre);
+            wrapper.appendChild(header);
+            wrapper.appendChild(pre);
         }
     });
 }
@@ -209,13 +334,20 @@ function renderMetricsHtml(metrics, isLive = false, liveData = null) {
             </div>`;
     }
 
-    if (!metrics) return '';
+    const copyBtnHtml = `
+        <button type="button" class="copy-response-btn" onclick="copyMessageResponse(this)" title="Copiar resposta completa">
+            <i class="fa-regular fa-copy"></i> <span>Copiar resposta</span>
+        </button>`;
+
+    if (!metrics) {
+        return `<div class="message-metrics-container">${copyBtnHtml}</div>`;
+    }
 
     let m = metrics;
     if (typeof m === 'string') {
-        try { m = JSON.parse(m); } catch (e) { return ''; }
+        try { m = JSON.parse(m); } catch (e) { return `<div class="message-metrics-container">${copyBtnHtml}</div>`; }
     }
-    if (!m) return '';
+    if (!m) return `<div class="message-metrics-container">${copyBtnHtml}</div>`;
 
     const speed = m.tok_per_sec || (m.eval_duration > 0 ? (m.eval_count / (m.eval_duration / 1e9)).toFixed(1) : '0.0');
     const time = m.total_sec || (m.total_duration ? (m.total_duration / 1e9).toFixed(1) : '0.0');
@@ -251,7 +383,15 @@ function renderMetricsHtml(metrics, isLive = false, liveData = null) {
                     ${tooltipRows}
                 </div>
             </div>
+            ${copyBtnHtml}
         </div>`;
+}
+
+function copyMessageResponse(btn) {
+    const msgDiv = btn.closest('.message');
+    if (!msgDiv) return;
+    const rawText = msgDiv.dataset.rawContent || (msgDiv.querySelector('.bubble') ? msgDiv.querySelector('.bubble').innerText : '');
+    copyToClipboard(rawText.trim(), btn);
 }
 
 function addMessage(role, content, isStreaming = false, metrics = null) {
@@ -333,6 +473,7 @@ function addMessage(role, content, isStreaming = false, metrics = null) {
     msgDiv.innerHTML = '';
     
     const parsed = parseThoughtAndContent(content);
+    msgDiv.dataset.rawContent = parsed.content || (parsed.hasThought ? '' : content);
 
     if (parsed.hasThought && parsed.thought) {
         const thoughtContainer = document.createElement('div');
@@ -358,12 +499,10 @@ function addMessage(role, content, isStreaming = false, metrics = null) {
 
     applyCodeBlockFeatures(msgDiv);
 
-    if (metrics) {
-        const metricsWrap = document.createElement('div');
-        metricsWrap.className = 'message-metrics-wrap';
-        metricsWrap.innerHTML = renderMetricsHtml(metrics);
-        msgDiv.appendChild(metricsWrap);
-    }
+    const metricsWrap = document.createElement('div');
+    metricsWrap.className = 'message-metrics-wrap';
+    metricsWrap.innerHTML = renderMetricsHtml(metrics);
+    msgDiv.appendChild(metricsWrap);
 
     chatBox.scrollTop = chatBox.scrollHeight;
     return msgDiv;
@@ -371,9 +510,21 @@ function addMessage(role, content, isStreaming = false, metrics = null) {
 
 async function copyToClipboard(text, btn) {
     try {
-        await navigator.clipboard.writeText(text);
+        if (navigator.clipboard && window.isSecureContext) {
+            await navigator.clipboard.writeText(text);
+        } else {
+            const ta = document.createElement('textarea');
+            ta.value = text;
+            ta.style.position = 'fixed';
+            ta.style.opacity = '0';
+            document.body.appendChild(ta);
+            ta.focus();
+            ta.select();
+            document.execCommand('copy');
+            document.body.removeChild(ta);
+        }
         const originalHTML = btn.innerHTML;
-        btn.innerHTML = 'Copiado!';
+        btn.innerHTML = '<i class="fa-solid fa-check"></i> Copiado!';
         btn.classList.add('copied');
         setTimeout(() => {
             btn.innerHTML = originalHTML;
@@ -404,7 +555,15 @@ function stopResponse() {
 async function enviar() {
     const input = document.getElementById('msg-input');
     const msg = input.value.trim();
-    if (!msg || !currentConversationId) return;
+    if (!msg) return;
+
+    if (!currentConversationId) {
+        await createNewChat();
+        if (!currentConversationId) {
+            alert("Não foi possível criar uma conversa no banco de dados.");
+            return;
+        }
+    }
 
     input.value = '';
     input.style.height = 'auto';
@@ -426,6 +585,8 @@ async function enviar() {
 
     let fullAiThinking = "";
     let fullAiContent = "";
+    let renderTargetContent = "";
+    let displayedContent = "";
     let inEmbeddedThink = false;
     let isThinking = false;
     let hasThought = false;
@@ -439,6 +600,27 @@ async function enviar() {
     let aiMsgDiv = addMessage('assistant', "", true);
     let isStreamActive = true;
     let timeoutReached = false;
+
+    // Renderizador fluido sincronizado com a velocidade dos tokens
+    const typewriterInterval = setInterval(() => {
+        if (!isStreamActive && displayedContent.length >= renderTargetContent.length) {
+            clearInterval(typewriterInterval);
+            return;
+        }
+        if (displayedContent.length < renderTargetContent.length) {
+            const diff = renderTargetContent.length - displayedContent.length;
+            const step = diff > 60 ? Math.ceil(diff / 3) : (diff > 15 ? Math.ceil(diff / 4) : (diff > 4 ? 2 : 1));
+            displayedContent = renderTargetContent.slice(0, displayedContent.length + step);
+
+            const bubble = aiMsgDiv.querySelector('.bubble');
+            if (bubble) {
+                bubble.innerHTML = renderMarkdown(displayedContent);
+                applyCodeBlockFeatures(aiMsgDiv);
+            }
+            const chatBox = document.getElementById('chat-messages');
+            if (chatBox) chatBox.scrollTop = chatBox.scrollHeight;
+        }
+    }, 12);
 
     const liveStatsInterval = setInterval(() => {
         if (!isStreamActive) {
@@ -508,24 +690,25 @@ async function enviar() {
         try {
             while (true) {
                 const { done, value } = await reader.read();
-                if (done || timeoutReached) break;
+                if (timeoutReached) break;
 
                 clearTimeout(timeoutId);
 
-                const chunk = decoder.decode(value, { stream: true });
-                const lines = (partialLine + chunk).split('\n');
-                partialLine = lines.pop();
+                const chunk = done ? decoder.decode() : decoder.decode(value, { stream: true });
+                const combined = partialLine + chunk;
+                const lines = done ? combined.split('\n') : combined.split('\n');
+                partialLine = done ? "" : lines.pop();
 
                 for (let line of lines) {
                     line = line.trim();
                     if (!line || line.startsWith(':')) continue;
 
                     let dataStr = line;
-                    if (dataStr.startsWith('data: ')) {
-                        dataStr = dataStr.slice(6).trim();
+                    if (dataStr.startsWith('data:')) {
+                        dataStr = dataStr.slice(5).trim();
                     }
                     if (dataStr === '[DONE]') {
-                        break;
+                        continue;
                     }
 
                     try {
@@ -541,7 +724,7 @@ async function enviar() {
                         if (json.choices && json.choices.length > 0 && json.choices[0].delta) {
                             const delta = json.choices[0].delta;
                             
-                            // A) Raciocínio (DeepSeek-R1 / o1 / o3)
+                            // A) Raciocínio (DeepSeek-R1 / o1 / o3 / Qwen)
                             const thinkChunk = delta.reasoning_content || delta.reasoning || delta.thought || '';
                             if (thinkChunk) {
                                 if (!firstTokenTime) firstTokenTime = performance.now();
@@ -582,7 +765,7 @@ async function enviar() {
                             if (contentChunk) {
                                 if (!firstTokenTime) firstTokenTime = performance.now();
 
-                                if (isThinking) {
+                                if (isThinking && !inEmbeddedThink) {
                                     isThinking = false;
                                     const thoughtEl = aiMsgDiv.querySelector('.thought-container');
                                     if (thoughtEl) {
@@ -639,12 +822,7 @@ async function enviar() {
                                 }
 
                                 streamTokens++;
-
-                                const bubble = aiMsgDiv.querySelector('.bubble');
-                                if (bubble) {
-                                    bubble.innerHTML = renderMarkdown(fullAiContent);
-                                    applyCodeBlockFeatures(aiMsgDiv);
-                                }
+                                renderTargetContent = fullAiContent;
                             }
                         }
 
@@ -683,11 +861,7 @@ async function enviar() {
                                 }
                                 fullAiContent += json.message.content;
                                 streamTokens++;
-                                const bubble = aiMsgDiv.querySelector('.bubble');
-                                if (bubble) {
-                                    bubble.innerHTML = renderMarkdown(fullAiContent);
-                                    applyCodeBlockFeatures(aiMsgDiv);
-                                }
+                                renderTargetContent = fullAiContent;
                             }
                         }
 
@@ -695,13 +869,12 @@ async function enviar() {
                             finalOllamaMetrics = json;
                         }
 
-                        const chatBox = document.getElementById('chat-messages');
-                        if (chatBox) chatBox.scrollTop = chatBox.scrollHeight;
-
                     } catch (e) {
                         console.warn("Falha ao processar linha:", line);
                     }
                 }
+
+                if (done) break;
             }
         } catch (err) {
             if (err.name === 'AbortError') {
@@ -715,6 +888,7 @@ async function enviar() {
         } finally {
             isStreamActive = false;
             clearInterval(liveStatsInterval);
+            clearInterval(typewriterInterval);
 
             if (isThinking) {
                 isThinking = false;
@@ -731,6 +905,7 @@ async function enviar() {
 
             const bubble = aiMsgDiv.querySelector('.bubble');
             if (bubble && fullAiContent !== "") {
+                aiMsgDiv.dataset.rawContent = fullAiContent;
                 bubble.innerHTML = renderMarkdown(fullAiContent);
                 applyCodeBlockFeatures(aiMsgDiv);
             }
@@ -798,6 +973,7 @@ async function enviar() {
     } catch (globalErr) {
         isStreamActive = false;
         clearInterval(liveStatsInterval);
+        clearInterval(typewriterInterval);
         if (globalErr.name !== 'AbortError') {
             console.error("Global fetch error:", globalErr);
             aiMsgDiv.querySelector('.bubble').innerHTML = "❌ Erro crítico: " + escapeHtml(globalErr.message);
@@ -826,6 +1002,9 @@ async function checkServiceStatus() {
         if (data.online) {
             dot.className = 'status-dot online';
             text.innerHTML = `Online <span style="font-size: 11px; opacity: 0.8; margin-left: 5px;">• ${escapeHtml(endpointLabel)}</span>`;
+            if (installedModelsGlobal.length === 0) {
+                fetchModels();
+            }
         } else {
             dot.className = 'status-dot offline';
             text.innerHTML = `Offline <span style="font-size: 11px; opacity: 0.8; margin-left: 5px;">• ${escapeHtml(endpointLabel)}</span>`;
@@ -850,10 +1029,10 @@ async function fetchModels() {
         
         select.innerHTML = '';
 
-        // 1. Modelos detectados na API configurada
+        // 1. Modelos detectados na API configurada (/v1/models)
         if (availableModelIds.length > 0) {
             const serverGroup = document.createElement('optgroup');
-            serverGroup.label = "Modelos Disponíveis na API";
+            serverGroup.label = "Modelos Disponíveis na API (/v1/models)";
             availableModelIds.forEach(m => {
                 const opt = document.createElement('option');
                 opt.value = m;
@@ -877,12 +1056,17 @@ async function fetchModels() {
         });
         select.appendChild(targetGroup);
 
-        // Restaura seleção anterior ou seleciona o primeiro modelo do servidor
+        // Prioriza modelos reais retornados pelo servidor (/v1/models)
         const lastModel = localStorage.getItem('selectedModel');
-        if (lastModel && Array.from(select.options).some(o => o.value === lastModel)) {
+        if (availableModelIds.length > 0) {
+            if (lastModel && availableModelIds.includes(lastModel)) {
+                select.value = lastModel;
+            } else {
+                select.value = availableModelIds[0];
+                localStorage.setItem('selectedModel', availableModelIds[0]);
+            }
+        } else if (lastModel && Array.from(select.options).some(o => o.value === lastModel)) {
             select.value = lastModel;
-        } else if (availableModelIds.length > 0) {
-            select.value = availableModelIds[0];
         } else {
             select.value = TARGET_MODELS[0].id;
         }

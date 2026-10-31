@@ -9,6 +9,7 @@ if (function_exists('apache_setenv')) {
 require 'db.php';
 
 set_time_limit(0);
+ignore_user_abort(true);
 
 $prompt = $_POST['prompt'] ?? '';
 $conversation_id = $_POST['conversation_id'] ?? null;
@@ -143,103 +144,233 @@ $full_content = "";
 $final_metrics = null;
 $start_time = microtime(true);
 $first_token_time = null;
-
-$ch = curl_init($url);
-curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
-curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
-curl_setopt($ch, CURLOPT_RETURNTRANSFER, false);
-curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 10);
-curl_setopt($ch, CURLOPT_TIMEOUT, 180);
-curl_setopt($ch, CURLOPT_TCP_NODELAY, 1);
-curl_setopt($ch, CURLOPT_BUFFERSIZE, 128);
-
+$streamed_tokens_count = 0;
 $buffer = "";
-curl_setopt($ch, CURLOPT_WRITEFUNCTION, function($ch, $chunk) use (
-    &$full_thinking, &$full_content, &$final_metrics, &$buffer, &$start_time, &$first_token_time
+
+$processLine = function($rawLine) use (
+    &$full_thinking, &$full_content, &$final_metrics, &$start_time, &$first_token_time, &$streamed_tokens_count
 ) {
-    // Repassa o chunk diretamente ao cliente SSE
-    echo $chunk;
-    if (ob_get_level() > 0) ob_flush();
+    $line = trim($rawLine);
+    if ($line === '' || strpos($line, ':') === 0) return;
+
+    // Repassa a linha SSE ao cliente com padding de comentário SSE para forçar flush imediato no Apache/Windows
+    echo $line . "\n";
+    echo ":" . str_repeat(" ", 2048) . "\n\n";
+    if (ob_get_level() > 0) @ob_flush();
     flush();
-    
+
+    $dataStr = $line;
+    if (strpos($line, 'data:') === 0) {
+        $dataStr = trim(substr($line, 5));
+    }
+
+    if ($dataStr === '[DONE]') {
+        return;
+    }
+
+    $json = json_decode($dataStr, true);
+    if ($json && is_array($json)) {
+        // 1. Processa escolhas e deltas da resposta OpenAI (/v1/chat/completions)
+        if (isset($json['choices'][0]['delta'])) {
+            if ($first_token_time === null) {
+                $first_token_time = microtime(true);
+            }
+
+            $delta = $json['choices'][0]['delta'];
+
+            // Suporte para pensamento / raciocínio (OpenAI-compatible / DeepSeek / Ollama / o1 / o3)
+            $think_chunk = $delta['reasoning_content'] ?? $delta['reasoning'] ?? $delta['thought'] ?? '';
+            if ($think_chunk !== '') {
+                $full_thinking .= $think_chunk;
+                $streamed_tokens_count++;
+            }
+
+            // Conteúdo normal da resposta
+            if (isset($delta['content']) && $delta['content'] !== '') {
+                $full_content .= $delta['content'];
+                $streamed_tokens_count++;
+            }
+        }
+
+        // 2. Processa estatísticas de uso (stream_options: include_usage)
+        if (isset($json['usage']) && is_array($json['usage'])) {
+            $now = microtime(true);
+            $total_sec = round($now - $start_time, 2);
+            $gen_sec = ($first_token_time !== null) ? round($now - $first_token_time, 2) : $total_sec;
+
+            $prompt_tokens = $json['usage']['prompt_tokens'] ?? 0;
+            $completion_tokens = $json['usage']['completion_tokens'] ?? $streamed_tokens_count;
+            $total_tokens = $json['usage']['total_tokens'] ?? ($prompt_tokens + $completion_tokens);
+
+            $tok_per_sec = ($gen_sec > 0.05 && $completion_tokens > 0) ? round($completion_tokens / $gen_sec, 1) : 0;
+
+            $final_metrics = json_encode([
+                'eval_count' => $completion_tokens,
+                'prompt_eval_count' => $prompt_tokens,
+                'total_tokens' => $total_tokens,
+                'total_sec' => $total_sec,
+                'tok_per_sec' => $tok_per_sec
+            ]);
+        }
+    }
+};
+
+$processChunk = function($chunk) use (&$buffer, $processLine) {
     $buffer .= $chunk;
     $lines = explode("\n", $buffer);
     $buffer = array_pop($lines);
-    
     foreach ($lines as $line) {
-        $line = trim($line);
-        if (empty($line) || strpos($line, ':') === 0) continue;
-        
-        $dataStr = $line;
-        if (strpos($line, 'data: ') === 0) {
-            $dataStr = trim(substr($line, 6));
+        $processLine($line);
+    }
+};
+
+$flushRemainingBuffer = function() use (&$buffer, $processLine) {
+    if (trim($buffer) !== '') {
+        $rem = $buffer;
+        $buffer = '';
+        $processLine($rem);
+    }
+};
+
+$payload = json_encode($data);
+
+if (function_exists('curl_init')) {
+    $ch = curl_init($url);
+    curl_setopt($ch, CURLOPT_POSTFIELDS, $payload);
+    curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, false);
+    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 10);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 180);
+    curl_setopt($ch, CURLOPT_TCP_NODELAY, 1);
+    curl_setopt($ch, CURLOPT_BUFFERSIZE, 128);
+
+    curl_setopt($ch, CURLOPT_WRITEFUNCTION, function($ch, $chunk) use ($processChunk) {
+        $processChunk($chunk);
+        return strlen($chunk);
+    });
+
+    $exec_result = curl_exec($ch);
+    $httpCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $flushRemainingBuffer();
+
+    if ($exec_result === false || $httpCode >= 400) {
+        $error = curl_error($ch);
+        if ($httpCode >= 400 && empty($error)) {
+            $error = "HTTP $httpCode retornado pela API OpenAI";
         }
-        
-        if ($dataStr === '[DONE]') {
-            continue;
+        $err_json = json_encode(["error" => "Erro na API OpenAI: $error"]);
+        echo "data: $err_json\n\n";
+        flush();
+    }
+
+    curl_close($ch);
+} else {
+    // Fallback via socket TCP/SSL direto sem buffer de 8KB para streaming instantâneo no XAMPP sem cURL
+    $parsed = parse_url($url);
+    $scheme = strtolower($parsed['scheme'] ?? 'http');
+    $host = $parsed['host'] ?? '127.0.0.1';
+    $port = $parsed['port'] ?? ($scheme === 'https' ? 443 : 80);
+    $path = ($parsed['path'] ?? '/v1/chat/completions') . (isset($parsed['query']) ? '?' . $parsed['query'] : '');
+    $transport = ($scheme === 'https') ? 'ssl' : 'tcp';
+
+    $errno = 0;
+    $errstr = '';
+    $fp = @stream_socket_client("$transport://$host:$port", $errno, $errstr, 10);
+
+    if (!$fp && ($host === '127.0.0.1' || $host === 'localhost')) {
+        $altHost = ($host === '127.0.0.1') ? 'localhost' : '127.0.0.1';
+        $fp = @stream_socket_client("$transport://$altHost:$port", $errno, $errstr, 10);
+    }
+
+    if (!$fp) {
+        $err_json = json_encode(["error" => "Erro ao conectar na API ($url): $errstr ($errno)"]);
+        echo "data: $err_json\n\n";
+        flush();
+    } else {
+        stream_set_timeout($fp, 300);
+        if (function_exists('stream_set_read_buffer')) {
+            @stream_set_read_buffer($fp, 0);
         }
-        
-        $json = json_decode($dataStr, true);
-        if ($json && is_array($json)) {
-            // 1. Processa escolhas e deltas da resposta OpenAI
-            if (isset($json['choices'][0]['delta'])) {
-                if ($first_token_time === null) {
-                    $first_token_time = microtime(true);
-                }
-                
-                $delta = $json['choices'][0]['delta'];
-                
-                // Suporte para pensamento / raciocínio (OpenAI-compatible / DeepSeek / o1 / o3)
-                $think_chunk = $delta['reasoning_content'] ?? $delta['reasoning'] ?? $delta['thought'] ?? '';
-                if ($think_chunk !== '') {
-                    $full_thinking .= $think_chunk;
-                }
-                
-                // Conteúdo normal da resposta
-                if (isset($delta['content']) && $delta['content'] !== '') {
-                    $full_content .= $delta['content'];
-                }
+        if (function_exists('stream_set_chunk_size')) {
+            @stream_set_chunk_size($fp, 64);
+        }
+
+        // HTTP/1.0 evita chunked transfer encoding e entrega cada linha data: imediatamente
+        $authHeader = !empty($openai_api_key) ? "Authorization: Bearer $openai_api_key\r\n" : "";
+        $req = "POST $path HTTP/1.0\r\n"
+             . "Host: $host:$port\r\n"
+             . "Content-Type: application/json\r\n"
+             . $authHeader
+             . "Content-Length: " . strlen($payload) . "\r\n"
+             . "Connection: close\r\n\r\n"
+             . $payload;
+        fwrite($fp, $req);
+
+        // Lê cabeçalhos HTTP da resposta
+        $httpCode = 0;
+        while (!feof($fp)) {
+            $hdrLine = fgets($fp, 1024);
+            if ($hdrLine === false) break;
+            if (preg_match('#^HTTP/\S+\s+(\d{3})#', $hdrLine, $m)) {
+                $httpCode = (int)$m[1];
             }
-            
-            // 2. Processa estatísticas de uso (stream_options: include_usage)
-            if (isset($json['usage'])) {
-                $now = microtime(true);
-                $total_sec = round($now - $start_time, 2);
-                $gen_sec = ($first_token_time !== null) ? round($now - $first_token_time, 2) : $total_sec;
-                
-                $prompt_tokens = $json['usage']['prompt_tokens'] ?? 0;
-                $completion_tokens = $json['usage']['completion_tokens'] ?? 0;
-                $total_tokens = $json['usage']['total_tokens'] ?? 0;
-                
-                $tok_per_sec = ($gen_sec > 0.05 && $completion_tokens > 0) ? round($completion_tokens / $gen_sec, 1) : 0;
-                
-                $final_metrics = json_encode([
-                    'eval_count' => $completion_tokens,
-                    'prompt_eval_count' => $prompt_tokens,
-                    'total_tokens' => $total_tokens,
-                    'total_sec' => $total_sec,
-                    'tok_per_sec' => $tok_per_sec
-                ]);
+            if (rtrim($hdrLine, "\r\n") === '') {
+                break; // Fim dos headers HTTP
             }
+        }
+
+        // Lê o corpo linha por linha em tempo real
+        $rawErrorBody = '';
+        while (!feof($fp)) {
+            $line = fgets($fp, 1024);
+            if ($line === false) break;
+            if ($httpCode >= 400) {
+                $rawErrorBody .= $line;
+            } else {
+                $processChunk($line);
+            }
+        }
+        $flushRemainingBuffer();
+        fclose($fp);
+
+        if ($httpCode >= 400) {
+            $decodedErr = json_decode($rawErrorBody, true);
+            $errMsg = $decodedErr['error']['message'] ?? $decodedErr['error'] ?? ("HTTP $httpCode retornado pela API");
+            $err_json = json_encode(["error" => "Erro na API OpenAI: $errMsg"]);
+            echo "data: $err_json\n\n";
+            flush();
         }
     }
-    return strlen($chunk);
-});
-
-$exec_result = curl_exec($ch);
-$httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-
-if ($exec_result === false || $httpCode >= 400) {
-    $error = curl_error($ch);
-    if ($httpCode >= 400 && empty($error)) {
-        $error = "HTTP $httpCode retornado pela API OpenAI";
-    }
-    $err_json = json_encode(["error" => "Erro na API OpenAI: $error"]);
-    echo "data: $err_json\n\n";
-    flush();
 }
 
-curl_close($ch);
+// Se o servidor não enviou o bloco 'usage' no stream, calcula métricas com base nos tokens recebidos
+if ($final_metrics === null && ($full_content !== '' || $full_thinking !== '')) {
+    $now = microtime(true);
+    $total_sec = round($now - $start_time, 2);
+    $gen_sec = ($first_token_time !== null) ? round($now - $first_token_time, 2) : $total_sec;
+    $completion_tokens = max(1, $streamed_tokens_count);
+    $tok_per_sec = ($gen_sec > 0.05) ? round($completion_tokens / $gen_sec, 1) : 0;
+
+    $final_metrics = json_encode([
+        'eval_count' => $completion_tokens,
+        'prompt_eval_count' => 0,
+        'total_tokens' => $completion_tokens,
+        'total_sec' => $total_sec,
+        'tok_per_sec' => $tok_per_sec
+    ]);
+
+    // Envia evento de usage sintetizado para o frontend exibir as métricas ao finalizar
+    $usageEvent = json_encode([
+        'usage' => [
+            'prompt_tokens' => 0,
+            'completion_tokens' => $completion_tokens,
+            'total_tokens' => $completion_tokens
+        ]
+    ]);
+    echo "data: $usageEvent\n\n";
+    echo "data: [DONE]\n\n";
+    flush();
+}
 
 // 7. Salva a resposta da IA no banco de dados
 $full_response = "";
