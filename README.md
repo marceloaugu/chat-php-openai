@@ -4,15 +4,18 @@ Interface web de chat em **PHP**, **JavaScript (ES6+)** e **Vanilla CSS** projet
 
 O projeto mantém compatibilidade configurável com a API oficial da **OpenAI** e com qualquer servidor ou provedor local/remoto que implemente a especificação de API compatível com OpenAI (como **Ollama**, **vLLM**, **llama.cpp** e **LM Studio** na rota `/v1`).
 
+> **API nativa do Ollama:** Caso queira utilizar exclusivamente a API nativa do Ollama (`/api/chat`, `/api/tags`, `/api/ps`, `/api/generate`) com controle direto de carga/descarga de modelos em VRAM, consulte o projeto irmão: [**`marceloaugu/chat-php-ollama`**](https://github.com/marceloaugu/chat-php-ollama).
+
 ---
 
 ## 1. Apresentação
 
 O **`chat-php-openai`** disponibiliza uma interface leve, responsiva e sem dependências de frameworks pesados para interagir com modelos de linguagem locais ou remotos. O foco do projeto é oferecer:
 
-* Streaming de tokens em tempo real via **Server-Sent Events (SSE)**.
+* Streaming fluido de tokens em tempo real via **Server-Sent Events (SSE)** (compatível com cURL ou fallback nativo via socket TCP/SSL direto em ambientes XAMPP sem `php_curl`).
 * Suporte nativo à visualização de cadeias de raciocínio (*Chain-of-Thought* / *Reasoning*), recolhíveis na interface.
 * Telemetria de desempenho em tempo real e consolidada por mensagem (velocidade em `tok/s`, tempo total em segundos e contagem de tokens de prompt e resposta).
+* Gerenciamento completo de conversas na barra lateral (**criar**, **renomear** e **excluir** conversas) e botões dedicados para **copiar a resposta completa** ou **copiar trechos de código** com identificação da linguagem.
 * Persistência de histórico de conversas, modelos utilizados e métricas de execução em banco de dados **MySQL / MariaDB**, com criação e migração automática de esquema.
 * Recuperação de contexto local simplificada (**RAG por palavras-chave**) sobre o histórico da própria conversa.
 
@@ -67,14 +70,15 @@ chat-php-openai/
 ├── LICENSE             # Licença MIT
 ├── README.md           # Documentação técnica do projeto
 ├── THIRD_PARTY_NOTICES # Avisos de componentes de terceiros
-├── api.php             # Endpoints JSON para histórico, status do servidor e listagem de modelos
-├── chat.php            # Endpoint de streaming SSE, RAG simplificado e chamada a /chat/completions
+├── api.php             # Endpoints JSON: histórico (criar/renomear/excluir), status e /v1/models
+├── chat.php            # Endpoint de streaming SSE, RAG simplificado e chamada a /v1/chat/completions
 ├── db.php              # Leitor nativo de .env, conexão PDO e auto-migração do banco de dados
 ├── docker-compose.yml  # Orquestração de containers (chat-app + MariaDB 10.11)
 ├── index.php           # Interface principal do chat
 ├── schema.sql          # Esquema SQL de referência (tabelas conversations e messages)
-├── script.js           # Lógica de frontend, parser de streaming SSE, raciocínio e métricas
-└── style.css           # Estilização dark mode / Glassmorphism
+├── script.js           # Lógica de frontend, parser de streaming SSE fluido, raciocínio e métricas
+├── style.css           # Estilização dark mode / Glassmorphism
+└── test_openai.php    # Script utilitário para diagnóstico rápido de conectividade com /v1/models
 ```
 
 ---
@@ -178,13 +182,17 @@ A configuração é realizada por variáveis de ambiente lidas diretamente pelo 
 
 ### Opção A: Servidor Web Local (Apache / XAMPP)
 
-1. Certifique-se de que o Apache, o MySQL/MariaDB e o servidor de inferência compatível com OpenAI estejam em execução.
-2. Acesse no navegador:
+1. Certifique-se de que o Apache, o MySQL/MariaDB e o servidor de inferência compatível com OpenAI (ou Ollama em `/v1`) estejam em execução.
+2. (Opcional) Teste a comunicação direta do PHP com o endpoint `/v1/models` executando no terminal ou abrindo no navegador (`http://localhost/chat-php-openai/test_openai.php`):
+   ```bash
+   php test_openai.php
+   ```
+3. Acesse no navegador:
    ```text
    http://localhost/chat-php-openai/
    ```
-3. Verifique no canto inferior esquerdo da barra lateral se o indicador apresenta **Online** acompanhado do endereço do endpoint configurado.
-4. Selecione o modelo desejado no menu superior (os modelos retornados por `/v1/models` aparecem sob o grupo **Modelos Disponíveis na API**) e envie sua mensagem.
+4. Verifique no canto inferior esquerdo da barra lateral se o indicador apresenta **Online** acompanhado do endereço do endpoint configurado.
+5. Selecione o modelo desejado no menu superior (os modelos retornados por `/v1/models` são selecionados automaticamente no grupo **Modelos Disponíveis na API (/v1/models)**) e envie sua mensagem.
 
 ### Opção B: Docker Compose
 
@@ -301,7 +309,8 @@ Ao final do stream, `chat.php` persiste no banco de dados o raciocínio encapsul
 
 * **Indicador exibe `Offline` na barra lateral:**
   * Verifique se o servidor compatível com OpenAI está em execução e escutando no endereço definido em `OPENAI_BASE_URL`.
-  * Teste manualmente no terminal: `curl http://127.0.0.1:8081/v1/models` (ou a porta correspondente ao seu servidor, como `11434` no Ollama).
+  * Execute `php test_openai.php` no terminal (ou acesse `http://localhost/chat-php-openai/test_openai.php`) para verificar o código HTTP retornado ao PHP, se a extensão `cURL` está ativa (ou usando o fallback nativo via PHP Streams) e a lista JSON retornada por `/v1/models`.
+  * Teste manualmente no terminal: `curl http://127.0.0.1:8081/v1/models` (ou a porta correspondente ao seu servidor, como `11434` no Ollama: `curl http://127.0.0.1:11434/v1/models`).
   * Se a aplicação PHP estiver rodando dentro de um container Docker e o servidor de inferência estiver no host, utilize `http://host.docker.internal:<porta>/v1` em vez de `127.0.0.1`.
 * **Erro `Erro ao conectar ou configurar o banco de dados`:**
   * Confirme se o serviço MySQL/MariaDB está ativo e se as credenciais `DB_HOST`, `DB_USER` e `DB_PASS` no arquivo `.env` estão corretas.
