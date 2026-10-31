@@ -60,7 +60,9 @@ chat-php-openai/
 ├── .env.example        # Modelo de variáveis de ambiente (sem credenciais reais)
 ├── .gitignore          # Regras de proteção de credenciais, dumps e arquivos locais
 ├── Dockerfile          # Imagem Docker (PHP 8.4 + Apache + pdo_mysql + curl)
+├── LICENSE             # Licença MIT
 ├── README.md           # Documentação técnica do projeto
+├── THIRD_PARTY_NOTICES # Avisos de componentes de terceiros
 ├── api.php             # Endpoints JSON para histórico, status do servidor e listagem de modelos
 ├── chat.php            # Endpoint de streaming SSE, RAG simplificado e chamada a /chat/completions
 ├── db.php              # Leitor nativo de .env, conexão PDO e auto-migração do banco de dados
@@ -309,3 +311,9 @@ Ao final do stream, `chat.php` persiste no banco de dados o raciocínio encapsul
 
 1. **Gerenciamento de VRAM via UI:** As ações `list_running_models` e `run_model` em `api.php` são stubs que retornam sucesso imediato (`{"models": []}` e `{"success": true}`), pois o protocolo padrão OpenAI `/v1` não define endpoints para carregar ou descarregar modelos explicitamente na VRAM.
 2. **RAG Simplificado:** A busca contextual utiliza correspondência lexical (`SQL LIKE`) sobre mensagens anteriores da mesma conversa, não utilizando banco de dados vetorial ou embeddings.
+
+---
+
+## 13. Licença
+
+Distribuído sob a [licença MIT](LICENSE). Os avisos de componentes de terceiros embutidos no código estão em [`THIRD_PARTY_NOTICES`](THIRD_PARTY_NOTICES).
