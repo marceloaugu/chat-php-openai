@@ -16,6 +16,10 @@ O **`chat-php-openai`** disponibiliza uma interface leve, responsiva e sem depen
 * Persistência de histórico de conversas, modelos utilizados e métricas de execução em banco de dados **MySQL / MariaDB**, com criação e migração automática de esquema.
 * Recuperação de contexto local simplificada (**RAG por palavras-chave**) sobre o histórico da própria conversa.
 
+### Motivação
+
+Este é um projeto pessoal, feito por curiosidade, para o **estudo de LLMs em uso local**; a compatibilidade com provedores remotos é um recurso opcional.
+
 ---
 
 ## 2. Objetivos
