@@ -1,0 +1,29 @@
+
+# --- nao versionar: dados, credenciais e dependencias ---
+*.sql
+*.sql.gz
+*.bak
+*.dump
+*.log
+*.pem
+*.key
+.env
+.env.*
+!.env.example
+wp-config.php
+config.php
+database.php
+db.php
+conexao.php
+connection.php
+backups/
+node_modules/
+vendor/
+xampp56.exe
+# --- nao versionar: terceiros, backups e uploads ---
+*.bkp
+*.exe
+DB/
+BACKUP/
+bkp/
+uploads/
