@@ -11,7 +11,8 @@ services:
       - DB_NAME=chat_app
       - DB_USER=chat_user
       - DB_PASS=chat_password
-      - OLLAMA_HOST=http://ollama:11434
+      - OPENAI_BASE_URL=http://host.docker.internal:8081/v1
+      - OPENAI_API_KEY=
     depends_on:
       - db
     restart: always

@@ -1,29 +1,49 @@
-
-# --- nao versionar: dados, credenciais e dependencias ---
-*.sql
-*.sql.gz
-*.bak
-*.dump
-*.log
-*.pem
-*.key
+# --- Credenciais e Variáveis de Ambiente ---
 .env
 .env.*
 !.env.example
+*.pem
+*.key
 wp-config.php
 config.php
 database.php
-db.php
 conexao.php
 connection.php
-backups/
-node_modules/
-vendor/
-xampp56.exe
-# --- nao versionar: terceiros, backups e uploads ---
+
+# --- Dumps, Backups e Dados Operacionais ---
+*.sql
+!schema.sql
+*.sql.gz
+*.bak
+*.dump
 *.bkp
-*.exe
-DB/
+backups/
 BACKUP/
 bkp/
+DB/
 uploads/
+
+# --- Logs, Cache e Arquivos Temporários ---
+*.log
+logs/
+error_log
+npm-debug.log*
+.cache/
+cache/
+tmp/
+temp/
+*.tmp
+*.swp
+*~
+
+# --- Dependências Geradas ---
+vendor/
+node_modules/
+
+# --- Configurações Específicas da Máquina / SO / IDE ---
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+*.exe
