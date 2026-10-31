@@ -5,19 +5,14 @@ let installedModelsGlobal = [];
 let reasoningEnabled = localStorage.getItem('reasoningEnabled') !== 'false'; // Padrão: ativado
 
 const TARGET_MODELS = [
-    { name: 'Llama 3 (8B)', id: 'llama3', reasoning: false },
-    { name: 'Llama 3.1 (8B)', id: 'llama3.1', reasoning: false },
-    { name: 'Llama 3.2 (1B)', id: 'llama3.2:1b', reasoning: false },
-    { name: 'Llama 3.2 (3B)', id: 'llama3.2:3b', reasoning: false },
-    { name: 'Phi-3 Mini (3.8B)', id: 'phi3:mini', reasoning: false },
-    { name: 'Phi-3.5 Mini (3.8B)', id: 'phi3.5', reasoning: false },
-    { name: 'Mistral v0.3 (7B)', id: 'mistral:v0.3', reasoning: false },
-    { name: 'DeepSeek-R1 (1.5B)', id: 'deepseek-r1:1.5b', reasoning: true },
-    { name: 'DeepSeek-R1 (7B)', id: 'deepseek-r1:7b', reasoning: true },
-    { name: 'DeepSeek-R1 (8B)', id: 'deepseek-r1:8b', reasoning: true },
-    { name: 'Gemma 2 (2B)', id: 'gemma2:2b', reasoning: false },
-    { name: 'Gemma 2 (9B)', id: 'gemma2:9b', reasoning: false },
-    { name: 'Qwen 2.5 (7B)', id: 'qwen2.5:7b', reasoning: false }
+    { name: 'GPT-4o', id: 'gpt-4o', reasoning: false },
+    { name: 'GPT-4o Mini', id: 'gpt-4o-mini', reasoning: false },
+    { name: 'o3-mini', id: 'o3-mini', reasoning: true },
+    { name: 'o1', id: 'o1', reasoning: true },
+    { name: 'o1-mini', id: 'o1-mini', reasoning: true },
+    { name: 'GPT-4 Turbo', id: 'gpt-4-turbo', reasoning: false },
+    { name: 'GPT-3.5 Turbo', id: 'gpt-3.5-turbo', reasoning: false },
+    { name: 'DeepSeek-R1 (OpenAI/Local)', id: 'deepseek-r1:8b', reasoning: true }
 ];
 
 function isReasoningModel(modelId) {
@@ -30,14 +25,16 @@ function isReasoningModel(modelId) {
         return target.reasoning;
     }
     
-    // Padrões conhecidos de modelos com raciocínio integrado (Chain-of-Thought)
-    return name.includes('deepseek-r1') ||
+    // Padrões conhecidos de modelos com raciocínio integrado (OpenAI o1/o3 e compatíveis como DeepSeek-R1)
+    return name.startsWith('o1') ||
+           name.startsWith('o3') ||
+           name.includes('deepseek-r1') ||
            name.includes('qwq') ||
            name.includes('marco-o1') ||
            name.includes('reasoner') ||
            name.includes('reasoning') ||
-           /\br1\b/.test(name) ||
-           /\bo[13]\b/.test(name);
+           /\bo[13]\b/.test(name) ||
+           /\br1\b/.test(name);
 }
 
 function updateReasoningUI() {
@@ -50,7 +47,7 @@ function updateReasoningUI() {
     const supportsReasoning = isReasoningModel(currentModel);
     
     if (!supportsReasoning) {
-        // Modelo não suporta raciocínio -> oculta o seletor da interface
+        // Modelo não suporta raciocínio -> oculta o botão da interface
         btn.style.display = 'none';
         btn.disabled = true;
         return;
@@ -211,12 +208,10 @@ function renderMetricsHtml(metrics, isLive = false, liveData = null) {
     if (!m) return '';
 
     const speed = m.tok_per_sec || (m.eval_duration > 0 ? (m.eval_count / (m.eval_duration / 1e9)).toFixed(1) : '0.0');
-    const time = m.total_sec || (m.total_duration ? (m.total_duration / 1e9).toFixed(1) : (m.eval_sec || '0.0'));
+    const time = m.total_sec || (m.total_duration ? (m.total_duration / 1e9).toFixed(1) : '0.0');
     const tokens = m.eval_count || 0;
     
-    const promptSpeed = (m.prompt_eval_duration > 0) ? (m.prompt_eval_count / (m.prompt_eval_duration / 1e9)).toFixed(1) : null;
     const promptTokens = m.prompt_eval_count || 0;
-    const loadMs = m.load_duration ? Math.round(m.load_duration / 1e6) : null;
 
     let tooltipRows = `
         <div class="tooltip-row"><span>Velocidade de geração:</span> <span>${speed} tok/s</span></div>
@@ -224,10 +219,7 @@ function renderMetricsHtml(metrics, isLive = false, liveData = null) {
         <div class="tooltip-row"><span>Tokens de resposta:</span> <span>${tokens} tokens</span></div>
     `;
     if (promptTokens > 0) {
-        tooltipRows += `<div class="tooltip-row"><span>Prompt avaliado:</span> <span>${promptTokens} tokens ${promptSpeed ? `(${promptSpeed} tok/s)` : ''}</span></div>`;
-    }
-    if (loadMs !== null && loadMs > 0) {
-        tooltipRows += `<div class="tooltip-row"><span>Carga do modelo:</span> <span>${loadMs} ms</span></div>`;
+        tooltipRows += `<div class="tooltip-row"><span>Tokens de prompt:</span> <span>${promptTokens} tokens</span></div>`;
     }
 
     return `
@@ -288,7 +280,7 @@ function addMessage(role, content, isStreaming = false, metrics = null) {
         if (!thoughtContainer) {
             thoughtContainer = document.createElement('div');
             thoughtContainer.className = 'thought-container is-collapsed';
-            thoughtContainer.style.display = 'none'; // Fica oculto até haver pensamento
+            thoughtContainer.style.display = 'none';
             thoughtContainer.innerHTML = `
                 <div class="thought-header" onclick="toggleThought(this)">
                     <div class="thought-header-left">
@@ -327,10 +319,9 @@ function addMessage(role, content, isStreaming = false, metrics = null) {
         return msgDiv;
     }
 
-    // Mensagem não streaming (carregada do histórico)
+    // Mensagem não streaming (histórico)
     msgDiv.innerHTML = '';
     
-    // Extrai possível raciocínio <think>...</think>
     const parsed = parseThoughtAndContent(content);
 
     if (parsed.hasThought && parsed.thought) {
@@ -355,10 +346,8 @@ function addMessage(role, content, isStreaming = false, metrics = null) {
     bubble.innerHTML = marked.parse(parsed.content || (parsed.hasThought ? '' : content));
     msgDiv.appendChild(bubble);
 
-    // Destaca códigos e adiciona botão de copiar
     applyCodeBlockFeatures(msgDiv);
 
-    // Adiciona pill de métricas se houver
     if (metrics) {
         const metricsWrap = document.createElement('div');
         metricsWrap.className = 'message-metrics-wrap';
@@ -392,7 +381,7 @@ function finalizeChat() {
     sendBtn.onclick = enviar;
     sendBtn.disabled = false;
     currentAbortController = null;
-    loadHistory(); // Atualiza título se necessário
+    loadHistory();
 }
 
 function stopResponse() {
@@ -413,7 +402,6 @@ async function enviar() {
 
     const sendBtn = document.getElementById('send-btn');
     
-    // Configura o botão como STOP (com pequeno delay para evitar abort acidental em clique duplo)
     sendBtn.classList.add('stop-btn');
     sendBtn.innerHTML = STOP_ICON;
     sendBtn.onclick = null;
@@ -435,13 +423,13 @@ async function enviar() {
     let streamStartTime = performance.now();
     let firstTokenTime = null;
     let streamTokens = 0;
+    let finalOpenAiMetrics = null;
     let finalOllamaMetrics = null;
 
     let aiMsgDiv = addMessage('assistant', "", true);
     let isStreamActive = true;
     let timeoutReached = false;
 
-    // Atualizador em tempo real das métricas e temporizadores
     const liveStatsInterval = setInterval(() => {
         if (!isStreamActive) {
             clearInterval(liveStatsInterval);
@@ -467,7 +455,6 @@ async function enviar() {
             });
         }
 
-        // Se estiver pensando, atualiza o cronômetro do pensamento
         if (isThinking && thinkingStartTime) {
             const thoughtEl = aiMsgDiv.querySelector('.thought-container');
             const timerEl = thoughtEl ? thoughtEl.querySelector('.thought-timer') : null;
@@ -478,7 +465,7 @@ async function enviar() {
         }
     }, 100);
 
-    let partialLine = ""; // Buffer para linhas incompletas
+    let partialLine = "";
 
     if (abortController.signal.aborted) return;
 
@@ -503,38 +490,51 @@ async function enviar() {
                 timeoutReached = true;
                 isStreamActive = false;
                 clearInterval(liveStatsInterval);
-                aiMsgDiv.querySelector('.bubble').innerHTML = "⚠️ O servidor demorou muito para responder. Por favor, verifique se o Ollama está ativo e tente novamente.";
+                aiMsgDiv.querySelector('.bubble').innerHTML = "⚠️ O servidor demorou muito para responder. Verifique se a API está acessível.";
                 finalizeChat();
             }
-        }, 30000);
+        }, 45000);
 
         try {
             while (true) {
                 const { done, value } = await reader.read();
                 if (done || timeoutReached) break;
 
-                // Recebendo dados -> renova/limpa o timeout
                 clearTimeout(timeoutId);
 
                 const chunk = decoder.decode(value, { stream: true });
                 const lines = (partialLine + chunk).split('\n');
-                partialLine = lines.pop(); // Guarda a última parte (incompleta)
+                partialLine = lines.pop();
 
-                for (const line of lines) {
-                    if (!line.trim() || line.startsWith(':')) continue;
+                for (let line of lines) {
+                    line = line.trim();
+                    if (!line || line.startsWith(':')) continue;
+
+                    let dataStr = line;
+                    if (dataStr.startsWith('data: ')) {
+                        dataStr = dataStr.slice(6).trim();
+                    }
+                    if (dataStr === '[DONE]') {
+                        break;
+                    }
+
                     try {
-                        const json = JSON.parse(line);
+                        const json = JSON.parse(dataStr);
                         if (json.error) {
-                            aiMsgDiv.querySelector('.bubble').innerHTML = "❌ " + json.error;
+                            const errMsg = typeof json.error === 'object' ? (json.error.message || JSON.stringify(json.error)) : json.error;
+                            aiMsgDiv.querySelector('.bubble').innerHTML = "❌ " + errMsg;
                             timeoutReached = true;
                             break;
                         }
 
-                        if (json.message) {
-                            // 1. Processa pensamento do modelo (Ollama nativo: message.thinking)
-                            if (json.message.thinking) {
+                        // 1. Processa formato OpenAI / v1 (choices[0].delta)
+                        if (json.choices && json.choices.length > 0 && json.choices[0].delta) {
+                            const delta = json.choices[0].delta;
+                            
+                            // A) Raciocínio (DeepSeek-R1 / o1 / o3)
+                            const thinkChunk = delta.reasoning_content || delta.reasoning || delta.thought || '';
+                            if (thinkChunk) {
                                 if (!firstTokenTime) firstTokenTime = performance.now();
-                                
                                 if (!isThinking) {
                                     isThinking = true;
                                     hasThought = true;
@@ -556,7 +556,7 @@ async function enviar() {
                                     }
                                 }
 
-                                fullAiThinking += json.message.thinking;
+                                fullAiThinking += thinkChunk;
                                 streamTokens++;
 
                                 const thoughtContent = aiMsgDiv.querySelector('.thought-content');
@@ -567,11 +567,11 @@ async function enviar() {
                                 }
                             }
 
-                            // 2. Processa resposta do modelo (message.content)
-                            if (json.message.content) {
+                            // B) Conteúdo principal da resposta
+                            const contentChunk = delta.content || '';
+                            if (contentChunk) {
                                 if (!firstTokenTime) firstTokenTime = performance.now();
 
-                                // Se o pensamento estava ativo e começou a resposta, encerra o estado pensando
                                 if (isThinking) {
                                     isThinking = false;
                                     const thoughtEl = aiMsgDiv.querySelector('.thought-container');
@@ -585,10 +585,8 @@ async function enviar() {
                                     }
                                 }
 
-                                // Suporte para modelos que inserem tags <think> dentro de content
-                                const rawChunk = json.message.content;
-                                if (rawChunk.includes('<think>') || inEmbeddedThink) {
-                                    let processChunk = rawChunk;
+                                if (contentChunk.includes('<think>') || inEmbeddedThink) {
+                                    let processChunk = contentChunk;
                                     if (processChunk.includes('<think>')) {
                                         inEmbeddedThink = true;
                                         isThinking = true;
@@ -627,7 +625,7 @@ async function enviar() {
                                         thoughtContent.innerHTML = marked.parse(fullAiThinking);
                                     }
                                 } else {
-                                    fullAiContent += rawChunk;
+                                    fullAiContent += contentChunk;
                                 }
 
                                 streamTokens++;
@@ -640,7 +638,49 @@ async function enviar() {
                             }
                         }
 
-                        // 3. Captura estatísticas finais do Ollama quando done: true
+                        // 2. Processa estatísticas de uso OpenAI
+                        if (json.usage) {
+                            finalOpenAiMetrics = json.usage;
+                        }
+
+                        // 3. Compatibilidade retroativa com formato Ollama legado
+                        if (json.message) {
+                            if (json.message.thinking) {
+                                if (!firstTokenTime) firstTokenTime = performance.now();
+                                if (!isThinking) {
+                                    isThinking = true;
+                                    hasThought = true;
+                                    thinkingStartTime = performance.now();
+                                    const thoughtEl = aiMsgDiv.querySelector('.thought-container');
+                                    if (thoughtEl) {
+                                        thoughtEl.style.display = 'block';
+                                        thoughtEl.classList.remove('is-collapsed');
+                                        thoughtEl.classList.add('is-thinking');
+                                    }
+                                }
+                                fullAiThinking += json.message.thinking;
+                                streamTokens++;
+                                const thoughtContent = aiMsgDiv.querySelector('.thought-content');
+                                if (thoughtContent) thoughtContent.innerHTML = marked.parse(fullAiThinking);
+                            }
+
+                            if (json.message.content) {
+                                if (!firstTokenTime) firstTokenTime = performance.now();
+                                if (isThinking) {
+                                    isThinking = false;
+                                    const thoughtEl = aiMsgDiv.querySelector('.thought-container');
+                                    if (thoughtEl) thoughtEl.classList.remove('is-thinking');
+                                }
+                                fullAiContent += json.message.content;
+                                streamTokens++;
+                                const bubble = aiMsgDiv.querySelector('.bubble');
+                                if (bubble) {
+                                    bubble.innerHTML = marked.parse(fullAiContent);
+                                    applyCodeBlockFeatures(aiMsgDiv);
+                                }
+                            }
+                        }
+
                         if (json.done) {
                             finalOllamaMetrics = json;
                         }
@@ -649,7 +689,7 @@ async function enviar() {
                         if (chatBox) chatBox.scrollTop = chatBox.scrollHeight;
 
                     } catch (e) {
-                        console.warn("Falha ao processar linha JSON:", line);
+                        console.warn("Falha ao processar linha:", line);
                     }
                 }
             }
@@ -666,7 +706,6 @@ async function enviar() {
             isStreamActive = false;
             clearInterval(liveStatsInterval);
 
-            // Finaliza estado de pensamento se ainda estiver marcado como ativo
             if (isThinking) {
                 isThinking = false;
                 const thoughtEl = aiMsgDiv.querySelector('.thought-container');
@@ -680,7 +719,6 @@ async function enviar() {
                 }
             }
 
-            // Garante renderização final completa do Markdown
             const bubble = aiMsgDiv.querySelector('.bubble');
             if (bubble && fullAiContent !== "") {
                 bubble.innerHTML = marked.parse(fullAiContent);
@@ -692,11 +730,24 @@ async function enviar() {
                 thoughtContent.innerHTML = marked.parse(fullAiThinking);
             }
 
-            // Calcula e exibe as métricas de performance consolidadas
+            // Consolidação final das métricas
             const now = performance.now();
             let consolidatedMetrics = null;
 
-            if (finalOllamaMetrics && finalOllamaMetrics.eval_count) {
+            if (finalOpenAiMetrics && (finalOpenAiMetrics.completion_tokens || finalOpenAiMetrics.total_tokens)) {
+                const evalCount = finalOpenAiMetrics.completion_tokens || streamTokens;
+                const promptCount = finalOpenAiMetrics.prompt_tokens || 0;
+                const totalDurationSec = ((now - streamStartTime) / 1000).toFixed(1);
+                const genDuration = firstTokenTime ? (now - firstTokenTime) / 1000 : parseFloat(totalDurationSec);
+                const tokPerSec = (genDuration > 0.05 && evalCount > 0) ? (evalCount / genDuration).toFixed(1) : "0.0";
+
+                consolidatedMetrics = {
+                    eval_count: evalCount,
+                    prompt_eval_count: promptCount,
+                    tok_per_sec: tokPerSec,
+                    total_sec: totalDurationSec
+                };
+            } else if (finalOllamaMetrics && finalOllamaMetrics.eval_count) {
                 const evalCount = finalOllamaMetrics.eval_count;
                 const evalDuration = finalOllamaMetrics.eval_duration || 0;
                 const totalDuration = finalOllamaMetrics.total_duration || 0;
@@ -714,7 +765,6 @@ async function enviar() {
                     load_duration: finalOllamaMetrics.load_duration || 0
                 };
             } else {
-                // Fallback para métricas calculadas no cliente
                 const totalDurationSec = ((now - streamStartTime) / 1000).toFixed(1);
                 const genDuration = firstTokenTime ? (now - firstTokenTime) / 1000 : parseFloat(totalDurationSec);
                 const tokPerSec = (genDuration > 0.05 && streamTokens > 0) ? (streamTokens / genDuration).toFixed(1) : "0.0";
@@ -755,25 +805,10 @@ async function checkServiceStatus() {
 
         if (data.online) {
             dot.className = 'status-dot online';
-            
-            // Buscar modelo ativo rodando na VRAM
-            try {
-                const runningRes = await fetch('api.php?action=list_running_models');
-                const runningData = await runningRes.json();
-                const runningModels = runningData.models || [];
-                
-                if (runningModels.length > 0) {
-                    const activeModelNames = runningModels.map(m => m.name.replace(':latest', '')).join(', ');
-                    text.innerHTML = `Online <span style="font-size: 11px; opacity: 0.8; margin-left: 5px;">• Ativo: 🚀 <b>${activeModelNames}</b></span>`;
-                } else {
-                    text.innerHTML = 'Online <span style="font-size: 11px; opacity: 0.6; margin-left: 5px;">• Nenhum ativo</span>';
-                }
-            } catch (err) {
-                text.innerText = 'Online';
-            }
+            text.innerHTML = 'Online <span style="font-size: 11px; opacity: 0.8; margin-left: 5px;">• Servidor (:8081)</span>';
         } else {
             dot.className = 'status-dot offline';
-            text.innerText = 'Offline';
+            text.innerHTML = 'Offline <span style="font-size: 11px; opacity: 0.8; margin-left: 5px;">• Porta 8081</span>';
         }
     } catch (e) {
         const dot = document.getElementById('status-dot');
@@ -785,192 +820,73 @@ async function checkServiceStatus() {
 
 async function fetchModels() {
     try {
-        const [modelsRes, runningRes] = await Promise.all([
-            fetch('api.php?action=list_models'),
-            fetch('api.php?action=list_running_models')
-        ]);
-        const data = await modelsRes.json();
-        const runningData = await runningRes.json();
+        const res = await fetch('api.php?action=list_models');
+        const data = await res.json();
         const select = document.getElementById('model-select');
         
-        const installedModels = (data.models || []).map(m => m.name);
-        const runningModels = (runningData.models || []).map(m => m.name);
+        const modelsList = data.data || data.models || [];
+        const availableModelIds = modelsList.map(m => m.id || m.name || m);
+        installedModelsGlobal = availableModelIds;
         
-        installedModelsGlobal = installedModels;
-        
-        // Função auxiliar para verificar se o modelo está instalado (ignorando o sufixo :latest)
-        const checkInstalled = (modelId) => {
-            const cleanTarget = modelId.replace(/:latest$/, '');
-            return installedModels.some(m => m.replace(/:latest$/, '') === cleanTarget);
-        };
-
-        // Função auxiliar para verificar se o modelo está rodando
-        const checkRunning = (modelId) => {
-            const cleanTarget = modelId.replace(/:latest$/, '');
-            return runningModels.some(m => m.replace(/:latest$/, '') === cleanTarget);
-        };
-
         select.innerHTML = '';
 
-        // Add Target Models
+        // 1. Modelos detectados da API local (porta 8081)
+        if (availableModelIds.length > 0) {
+            const serverGroup = document.createElement('optgroup');
+            serverGroup.label = "Modelos Ativos no Servidor (:8081)";
+            availableModelIds.forEach(m => {
+                const opt = document.createElement('option');
+                opt.value = m;
+                const isReasoning = isReasoningModel(m);
+                opt.innerText = m + (isReasoning ? ' 🧠 (Raciocínio)' : '');
+                serverGroup.appendChild(opt);
+            });
+            select.appendChild(serverGroup);
+        }
+
+        // 2. Modelos Padrão / Compatíveis
         const targetGroup = document.createElement('optgroup');
-        targetGroup.label = "Modelos Sugeridos";
-        
+        targetGroup.label = "Outros Modelos Sugeridos";
         TARGET_MODELS.forEach(target => {
-            const opt = document.createElement('option');
-            // Se o usuário tiver instalado com ":latest", usamos o nome exato retornado pelo Ollama
-            const exactInstalledName = (data.models || []).find(m => m.name.replace(/:latest$/, '') === target.id.replace(/:latest$/, ''));
-            const modelValue = exactInstalledName ? exactInstalledName.name : target.id;
-            opt.value = modelValue;
-            
-            const isInstalled = checkInstalled(target.id);
-            const isRunning = checkRunning(target.id);
-            
-            if (isRunning) {
-                opt.innerText = `${target.name} 🚀 (Rodando / RAM)`;
-                opt.style.fontWeight = 'bold';
-                opt.style.color = '#3fb950';
-            } else {
-                opt.innerText = `${target.name} ${isInstalled ? '✅ (Instalado)' : '⏳ (Pull necessário)'}`;
-                if (!isInstalled) opt.style.color = '#888';
+            if (!availableModelIds.includes(target.id)) {
+                const opt = document.createElement('option');
+                opt.value = target.id;
+                opt.innerText = target.name + (target.reasoning ? ' 🧠' : '');
+                targetGroup.appendChild(opt);
             }
-            targetGroup.appendChild(opt);
         });
         select.appendChild(targetGroup);
 
-        // Add other installed models not in target list
-        const otherModels = installedModels.filter(m => !TARGET_MODELS.some(t => t.id.replace(/:latest$/, '') === m.replace(/:latest$/, '')));
-        if (otherModels.length > 0) {
-            const otherGroup = document.createElement('optgroup');
-            otherGroup.label = "Outros Modelos Instalados";
-            otherModels.forEach(m => {
-                const opt = document.createElement('option');
-                opt.value = m;
-                const isRunning = checkRunning(m);
-                if (isRunning) {
-                    opt.innerText = `${m} 🚀 (Rodando / RAM)`;
-                    opt.style.fontWeight = 'bold';
-                    opt.style.color = '#3fb950';
-                } else {
-                    opt.innerText = `${m} ✅`;
-                }
-                otherGroup.appendChild(opt);
-            });
-            select.appendChild(otherGroup);
-        }
-
-        // Filtra apenas modelos reais de chat instalados (ignora modelos de embedding como nomic)
-        const chatCapableInstalledModels = installedModels.filter(m => !m.includes('embed'));
-
-        // Restore last selected model
+        // Restaura seleção anterior ou seleciona o primeiro modelo do servidor
         const lastModel = localStorage.getItem('selectedModel');
         if (lastModel && Array.from(select.options).some(o => o.value === lastModel)) {
             select.value = lastModel;
-        } else if (chatCapableInstalledModels.length > 0) {
-            // Default para o primeiro modelo sugerido que esteja instalado, ou o primeiro de chat
-            const firstInstalled = TARGET_MODELS.find(t => checkInstalled(t.id));
-            if (firstInstalled) {
-                const exactInstalledName = (data.models || []).find(m => m.name.replace(/:latest$/, '') === firstInstalled.id.replace(/:latest$/, ''));
-                select.value = exactInstalledName ? exactInstalledName.name : firstInstalled.id;
-            } else {
-                select.value = chatCapableInstalledModels[0];
-            }
+        } else if (availableModelIds.length > 0) {
+            select.value = availableModelIds[0];
+        } else {
+            select.value = TARGET_MODELS[0].id;
         }
         updateReasoningUI();
     } catch (e) {
         console.error("Erro ao buscar modelos:", e);
-        document.getElementById('model-select').innerHTML = '<option value="phi3:mini">Erro ao carregar modelos</option>';
+        document.getElementById('model-select').innerHTML = '<option value="default">Padrão (:8081)</option>';
         updateReasoningUI();
     }
 }
 
-// Save and activate selection
-document.getElementById('model-select').addEventListener('change', async (e) => {
+// Salva a seleção do modelo e atualiza os controles
+document.getElementById('model-select').addEventListener('change', (e) => {
     const selectedModel = e.target.value;
+    localStorage.setItem('selectedModel', selectedModel);
     updateReasoningUI();
-    
-    // Normalização para comparar nomes
-    const normalize = (name) => name.toLowerCase().trim().replace(/:latest$/, '');
-    const isInstalled = installedModelsGlobal.some(m => normalize(m) === normalize(selectedModel));
-    
-    if (!isInstalled) {
-        // Encontra o nome amigável do modelo
-        const target = TARGET_MODELS.find(t => normalize(t.id) === normalize(selectedModel));
-        const friendlyName = target ? target.name : selectedModel;
-        
-        // Alerta o usuário e desfaz a seleção
-        alert(`⚠️ O modelo "${friendlyName}" precisa ser instalado primeiro.\nExecute no terminal: ollama pull ${selectedModel}`);
-        
-        // Restaura a seleção anterior usando o valor salvo no localStorage
-        const lastModel = localStorage.getItem('selectedModel');
-        if (lastModel) {
-            e.target.value = lastModel;
-        } else {
-            // Recarrega modelos
-            fetchModels();
-        }
-        updateReasoningUI();
-        return;
-    }
-    
-    const select = e.target;
-    const sendBtn = document.getElementById('send-btn');
-    const msgInput = document.getElementById('msg-input');
-    const statusText = document.getElementById('status-text');
-    
-    // Bloquear UI temporariamente
-    select.disabled = true;
-    if (sendBtn) sendBtn.disabled = true;
-    if (msgInput) msgInput.disabled = true;
-    
-    statusText.innerHTML = `<span style="color: #fbbf24;"><i class="fa-solid fa-spinner fa-spin" style="margin-right: 5px;"></i> Inicializando <b>${selectedModel}</b>...</span>`;
-    
-    try {
-        const formData = new FormData();
-        formData.append('model', selectedModel);
-        
-        const res = await fetch('api.php?action=run_model', {
-            method: 'POST',
-            body: formData
-        });
-        const result = await res.json();
-        
-        if (result.success) {
-            localStorage.setItem('selectedModel', selectedModel);
-            // Sucesso!
-            statusText.innerHTML = `<span style="color: #3fb950;"><i class="fa-solid fa-circle-check" style="margin-right: 5px;"></i> Ativo: 🚀 <b>${selectedModel}</b></span>`;
-            
-            // Adiciona um pequeno delay visual e atualiza a lista de modelos para mostrar o foguete
-            setTimeout(async () => {
-                await fetchModels();
-                await checkServiceStatus();
-            }, 1000);
-        } else {
-            throw new Error(result.error || "Erro desconhecido ao carregar modelo");
-        }
-    } catch (err) {
-        console.error("Erro ao ativar modelo:", err);
-        alert(`❌ Falha ao carregar o modelo "${selectedModel}". Verifique se o Ollama está rodando.`);
-        // Desfaz seleção
-        const lastModel = localStorage.getItem('selectedModel');
-        if (lastModel) select.value = lastModel;
-        updateReasoningUI();
-        checkServiceStatus();
-    } finally {
-        // Desbloquear UI
-        select.disabled = false;
-        if (sendBtn) sendBtn.disabled = false;
-        if (msgInput) msgInput.disabled = false;
-        updateReasoningUI();
-    }
 });
 
-// Initialize
+// Inicialização
 (async () => {
     updateReasoningUI();
     checkServiceStatus();
-    fetchModels();
-    setInterval(checkServiceStatus, 5000);
+    await fetchModels();
+    setInterval(checkServiceStatus, 8000);
 
     const res = await fetch('api.php?action=list_conversations');
     const data = await res.json();

@@ -15,51 +15,68 @@ elseif ($action === 'get_messages') {
     $stmt = $pdo->prepare("SELECT role, content, model, metrics, created_at FROM messages WHERE conversation_id = ? ORDER BY created_at ASC");
     $stmt->execute([$conv_id]);
     echo json_encode($stmt->fetchAll());
-}
+} 
 
 elseif ($action === 'new_conversation') {
     $stmt = $pdo->prepare("INSERT INTO conversations (title) VALUES ('Nova Conversa')");
     $stmt->execute();
     echo json_encode(['id' => $pdo->lastInsertId()]);
-}
+} 
 
 elseif ($action === 'delete_conversation') {
     $conv_id = $_POST['conversation_id'] ?? 0;
     $stmt = $pdo->prepare("DELETE FROM conversations WHERE id = ?");
     $stmt->execute([$conv_id]);
     echo json_encode(['success' => true]);
-}
+} 
 
 elseif ($action === 'check_status') {
-    $url = "$ollama_host/api/tags";
+    // 1. Tenta $openai_base_url/models
+    $url = "$openai_base_url/models";
     $ch = curl_init($url);
+    $headers = ['Content-Type: application/json'];
+    if (!empty($openai_api_key)) {
+        $headers[] = 'Authorization: Bearer ' . $openai_api_key;
+    }
+    curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 3);
-    curl_setopt($ch, CURLOPT_TIMEOUT, 5);
-    curl_exec($ch);
-    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    curl_close($ch);
-    echo json_encode(['online' => ($httpCode === 200)]);
-}
-
-elseif ($action === 'list_models') {
-    $url = "$ollama_host/api/tags";
-    $ch = curl_init($url);
-    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 2);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 4);
     $response = curl_exec($ch);
     $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     curl_close($ch);
     
-    if ($httpCode === 200) {
-        echo $response;
-    } else {
-        echo json_encode(['models' => []]);
+    // 2. Se falhar, tenta endpoint alternativo /health ou sem /v1
+    if ($httpCode !== 200) {
+        $root_url = preg_replace('/\/v1\/?$/i', '', $openai_base_url);
+        $ch2 = curl_init("$root_url/health");
+        curl_setopt($ch2, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch2, CURLOPT_CONNECTTIMEOUT, 1);
+        curl_setopt($ch2, CURLOPT_TIMEOUT, 2);
+        curl_exec($ch2);
+        $code2 = curl_getinfo($ch2, CURLINFO_HTTP_CODE);
+        curl_close($ch2);
+        if ($code2 === 200) {
+            $httpCode = 200;
+        }
     }
-}
+    
+    $online = ($httpCode === 200);
+    echo json_encode([
+        'online' => $online,
+        'http_code' => $httpCode,
+        'base_url' => $openai_base_url
+    ]);
+} 
 
-elseif ($action === 'list_running_models') {
-    $url = "$ollama_host/api/ps";
+elseif ($action === 'list_models') {
+    $url = "$openai_base_url/models";
     $ch = curl_init($url);
+    $headers = ['Content-Type: application/json'];
+    if (!empty($openai_api_key)) {
+        $headers[] = 'Authorization: Bearer ' . $openai_api_key;
+    }
+    curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
     curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 3);
     curl_setopt($ch, CURLOPT_TIMEOUT, 5);
@@ -68,88 +85,51 @@ elseif ($action === 'list_running_models') {
     curl_close($ch);
     
     if ($httpCode === 200 && $response !== false) {
-        echo $response;
-    } else {
-        echo json_encode(['models' => []]);
+        $data = json_decode($response, true);
+        if (isset($data['data']) && is_array($data['data'])) {
+            echo $response;
+            exit;
+        }
     }
-}
+    
+    // Tenta fallback sem /v1 se houver
+    if (strpos($openai_base_url, '/v1') !== false) {
+        $root_url = preg_replace('/\/v1\/?$/i', '', $openai_base_url);
+        $ch2 = curl_init("$root_url/models");
+        curl_setopt($ch2, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch2, CURLOPT_CONNECTTIMEOUT, 2);
+        curl_setopt($ch2, CURLOPT_TIMEOUT, 3);
+        $alt_res = curl_exec($ch2);
+        $code2 = curl_getinfo($ch2, CURLINFO_HTTP_CODE);
+        curl_close($ch2);
+        if ($code2 === 200 && $alt_res !== false) {
+            echo $alt_res;
+            exit;
+        }
+    }
+    
+    // Lista padrão se não houver modelos listados pelo endpoint
+    echo json_encode([
+        'object' => 'list',
+        'data' => [
+            ['id' => 'default'],
+            ['id' => 'deepseek-r1'],
+            ['id' => 'gpt-4o'],
+            ['id' => 'gpt-4o-mini']
+        ]
+    ]);
+} 
+
+elseif ($action === 'list_running_models') {
+    echo json_encode(['models' => []]);
+} 
 
 elseif ($action === 'run_model') {
     $selected_model = $_POST['model'] ?? $_GET['model'] ?? '';
-    if (empty($selected_model)) {
-        echo json_encode(['error' => 'Modelo não fornecido']);
-        exit;
-    }
-
-    // 1. Obter modelos rodando atualmente
-    $ps_url = "$ollama_host/api/ps";
-    $ch = curl_init($ps_url);
-    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 3);
-    curl_setopt($ch, CURLOPT_TIMEOUT, 5);
-    $ps_response = curl_exec($ch);
-    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    curl_close($ch);
-
-    $running_models = [];
-    if ($httpCode === 200 && $ps_response !== false) {
-        $ps_data = json_decode($ps_response, true);
-        if (isset($ps_data['models']) && is_array($ps_data['models'])) {
-            foreach ($ps_data['models'] as $m) {
-                $running_models[] = $m['name'];
-            }
-        }
-    }
-
-    // Normalização para comparar nomes de modelos (ignora ":latest" e caixa alta/baixa)
-    $normalize = function($name) {
-        return strtolower(trim(str_replace(':latest', '', $name)));
-    };
-
-    $target_norm = $normalize($selected_model);
-    $unloaded = [];
-
-    // 2. Descarregar todos os outros modelos rodando
-    foreach ($running_models as $running) {
-        if ($normalize($running) !== $target_norm) {
-            $unload_url = "$ollama_host/api/generate";
-            $unload_data = json_encode([
-                "model" => $running,
-                "keep_alive" => 0
-            ]);
-
-            $ch = curl_init($unload_url);
-            curl_setopt($ch, CURLOPT_POSTFIELDS, $unload_data);
-            curl_setopt($ch, CURLOPT_HTTPHEADER, array('Content-Type:application/json'));
-            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-            curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 3);
-            curl_setopt($ch, CURLOPT_TIMEOUT, 5);
-            curl_exec($ch);
-            curl_close($ch);
-            $unloaded[] = $running;
-        }
-    }
-
-    // 3. Carregar o modelo selecionado na VRAM
-    $load_url = "$ollama_host/api/generate";
-    $load_data = json_encode([
-        "model" => $selected_model,
-        "keep_alive" => -1
-    ]);
-    $ch = curl_init($load_url);
-    curl_setopt($ch, CURLOPT_POSTFIELDS, $load_data);
-    curl_setopt($ch, CURLOPT_HTTPHEADER, array('Content-Type:application/json'));
-    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 10);
-    curl_setopt($ch, CURLOPT_TIMEOUT, 60);
-    $load_response = curl_exec($ch);
-    $loadCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    curl_close($ch);
-
     echo json_encode([
-        'success' => ($loadCode === 200 && $load_response !== false),
+        'success' => true,
         'loaded' => $selected_model,
-        'unloaded' => $unloaded
+        'unloaded' => []
     ]);
 }
 ?>

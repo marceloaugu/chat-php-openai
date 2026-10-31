@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Chat</title>
+    <title>Chat - OpenAI</title>
     <!-- Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
     <!-- Markdown & Syntax Highlighting -->
@@ -26,7 +26,7 @@
         
         <div id="status-container">
             <div id="status-dot" class="status-dot"></div>
-            <span id="status-text">Verificando serviço...</span>
+            <span id="status-text">Conectando à API OpenAI...</span>
         </div>
     </aside>
 
@@ -35,7 +35,7 @@
             <div class="header-controls">
                 <div class="model-selector-container">
                     <select id="model-select">
-                        <option value="phi3:mini">Carregando modelos...</option>
+                        <option value="gpt-4o">Carregando modelos...</option>
                     </select>
                 </div>
                 <button id="think-toggle-btn" class="think-toggle-btn active" onclick="toggleReasoning()" title="Clique para alternar entre respostas com raciocínio ou respostas diretas">
