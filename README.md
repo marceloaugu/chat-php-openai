@@ -2,9 +2,7 @@
 
 Interface web de chat em **PHP**, **JavaScript (ES6+)** e **Vanilla CSS** projetada para experimentação e avaliação de modelos de linguagem (LLMs) por meio de APIs compatíveis com o padrão **OpenAI** (`/v1/chat/completions` e `/v1/models`), utilizando o **Pantheon** como mecanismo de inferência local de referência.
 
-Este projeto integra uma linha de experimentação em PHP voltada à execução de LLMs em servidores locais equipados com GPUs **NVIDIA Tesla K80** (arquitetura **Kepler**, Compute Capability **SM 3.7**), mantendo compatibilidade configurável com qualquer servidor ou provedor que implemente a especificação de chat da OpenAI.
-
-> **Projeto irmão:** Para ambientes que utilizam exclusivamente a API nativa do Ollama (`/api/chat`, `/api/tags`, `/api/ps`, `/api/generate`), consulte o repositório **`chat-php-ollama`**.
+Este projeto integra uma linha de experimentação em PHP voltada à execução de LLMs em servidores locais equipados com GPUs **NVIDIA Tesla K80** (arquitetura **Kepler**, Compute Capability **SM 3.7**), mantendo compatibilidade configurável com qualquer servidor ou provedor que implemente a especificação de API compatível com OpenAI (inclusive o **Ollama** nessa configuração `/v1`).
 
 ---
 
@@ -75,7 +73,7 @@ Não há uma camada formal de adaptadores para múltiplos protocolos distintos; 
 chat-php-pantheon/
 ├── .env.example        # Modelo de variáveis de ambiente (sem credenciais reais)
 ├── .gitignore          # Regras de proteção de credenciais, dumps e arquivos locais
-├── Dockerfile          # Imagem Docker (PHP 8.2 + Apache + pdo_mysql + curl)
+├── Dockerfile          # Imagem Docker (PHP 8.4 + Apache + pdo_mysql + curl)
 ├── README.md           # Documentação técnica do projeto
 ├── api.php             # Endpoints JSON para histórico, status do servidor e listagem de modelos
 ├── chat.php            # Endpoint de streaming SSE, RAG simplificado e chamada a /chat/completions
@@ -84,29 +82,28 @@ chat-php-pantheon/
 ├── index.php           # Interface principal do chat
 ├── schema.sql          # Esquema SQL de referência (tabelas conversations e messages)
 ├── script.js           # Lógica de frontend, parser de streaming SSE, raciocínio e métricas
-├── style.css           # Estilização dark mode / Glassmorphism
-└── test_ollama.php     # Script auxiliar legado para teste isolado de conectividade Ollama
+└── style.css           # Estilização dark mode / Glassmorphism
 ```
 
 ---
 
 ## 4. Tecnologias
 
-* **Backend:** PHP 8.x (utilizando extensões nativas `pdo_mysql`, `curl`, `json`, `mbstring`; sem dependências do Composer).
+* **Backend:** PHP 8.4 (compatível com PHP 8.x, utilizando extensões nativas `pdo_mysql`, `curl`, `json`, `mbstring`; sem dependências do Composer).
 * **Frontend:** HTML5, Vanilla CSS (Dark Mode / Glassmorphism) e JavaScript ES6+ (`fetch`, `ReadableStream`, `AbortController`).
 * **Bibliotecas Client-Side (via CDN):**
   * [Marked.js](https://marked.js.org/) — Renderização de Markdown em tempo real.
   * [Highlight.js](https://highlightjs.org/) (`11.9.0`, tema `github-dark`) — Realce de sintaxe em blocos de código com botão de cópia.
   * [FontAwesome](https://fontawesome.com/) (`6.4.0`) e fonte **Inter** (Google Fonts).
 * **Banco de Dados:** MySQL 8.0+ ou MariaDB 10.11+.
-* **Mecanismo de Inferência de Referência:** **Pantheon** (ou qualquer servidor compatível com a API `/v1` da OpenAI).
+* **Mecanismo de Inferência de Referência:** **Pantheon** (ou qualquer servidor compatível com a API `/v1` da OpenAI, incluindo o Ollama).
 
 ---
 
 ## 5. Requisitos
 
 * **Ambiente Local (XAMPP / LAMP / WAMP):**
-  * PHP `>= 8.0` (recomendado PHP `8.2`) com extensões `pdo_mysql`, `curl` e `mbstring` habilitadas.
+  * PHP `>= 8.0` (recomendado PHP `8.4`, utilizado na configuração de container) com extensões `pdo_mysql`, `curl` e `mbstring` habilitadas.
   * Servidor web Apache (com `mod_rewrite` opcional) ou Nginx.
   * Servidor MySQL ou MariaDB acessível.
 * **Mecanismo de Inferência:**
@@ -209,28 +206,24 @@ A configuração é realizada por variáveis de ambiente lidas diretamente pelo 
 
 ## 9. Integração com APIs e Compatibilidade
 
-### Atenção: Diferença entre API Compatível com OpenAI (`/v1`) e API Nativa do Ollama (`/api`)
+Este projeto opera sobre a **especificação de API compatível com OpenAI (`/v1`)** no backend (`api.php` e `chat.php`), funcionando de forma transparente com qualquer servidor de inferência que implemente esse contrato — inclusive o **Ollama** quando configurado através do seu endpoint compatível (`/v1`).
 
-Este projeto implementa no backend (`api.php` e `chat.php`) **exclusivamente a especificação compatível com OpenAI**:
+| Característica | Especificação Implementada (`chat-php-pantheon`) |
+| :--- | :--- |
+| **Endpoint de Chat** | `POST {OPENAI_BASE_URL}/chat/completions` |
+| **Listagem de Modelos** | `GET {OPENAI_BASE_URL}/models` (com fallback para `/health` e `/models`) |
+| **Formato do Stream** | SSE (`data: {"choices":[{"delta":{...}}]}` + `data: [DONE]`) |
+| **Extração de Raciocínio** | `delta.reasoning_content`, `delta.reasoning`, `delta.thought` ou `<think>` |
+| **Métricas de Uso** | Objeto `usage` (`prompt_tokens`, `completion_tokens`, `total_tokens`) |
 
-| Característica | Implementado neste projeto (`chat-php-pantheon`) | Implementado no projeto irmão (`chat-php-ollama`) |
-| :--- | :--- | :--- |
-| **Endpoint de Chat** | `POST {OPENAI_BASE_URL}/chat/completions` | `POST {OLLAMA_HOST}/api/chat` |
-| **Listagem de Modelos** | `GET {OPENAI_BASE_URL}/models` | `GET {OLLAMA_HOST}/api/tags` |
-| **Formato do Stream** | SSE (`data: {"choices":[{"delta":{...}}]}` + `data: [DONE]`) | NDJSON (`{"message":{"content":"..."},"done":false}`) |
-| **Extração de Raciocínio** | `delta.reasoning_content`, `delta.reasoning`, `delta.thought` ou `<think>` | `message.thinking` ou `<think>` |
-| **Métricas de Uso** | Objeto `usage` (`prompt_tokens`, `completion_tokens`, `total_tokens`) | Campos de duração em nanossegundos no chunk `done: true` |
+### Provedores e Motores Compatíveis
 
-### Tabela de Compatibilidade Verificada no Código
-
-| Provedor / Motor | Interface | Situação no `chat-php-pantheon` | Observações Técnicas |
+| Provedor / Motor | Endpoint Base (`OPENAI_BASE_URL`) | Situação | Observações Técnicas |
 | :--- | :--- | :--- | :--- |
-| **Pantheon** | Compatível com OpenAI (`/v1`) | **Implementado e testado** | Ambiente de referência (testado em 2x Tesla K80 / SM 3.7 com `Qwen3.6-35B-A3B` a ~20 tok/s). Inclui fallback de status em `/health` e `/models`. |
-| **OpenAI Remota** | API OpenAI (`https://api.openai.com/v1`) | **Compatível mediante configuração** | Basta configurar `OPENAI_BASE_URL` e `OPENAI_API_KEY`. Suporta `Bearer` token, `stream_options.include_usage`, papel `developer` e `reasoning_effort`. |
-| **Ollama Convencional** | Compatível com OpenAI (`/v1`) | **Compatível mediante configuração** | Funcional ao definir `OPENAI_BASE_URL=http://localhost:11434/v1`. Não executa pré-alocação/descarregamento explícito de VRAM (`/api/generate`). |
-| **Ollama Dogkeeper** | Compatível com OpenAI (`/v1`) | **Compatível mediante configuração** | Compatível caso a versão compilada exponha os endpoints `/v1/chat/completions` e `/v1/models`. |
-| **Ollama (Convencional ou Dogkeeper)** | API Nativa (`/api/chat`) | **Não implementado** | `chat.php` envia payload para `/chat/completions`. Para usar a API nativa `/api/chat`, utilize o projeto **`chat-php-ollama`**. |
-| **vLLM / llama.cpp (`llama-server`) / LM Studio** | Compatível com OpenAI (`/v1`) | **Compatível mediante configuração** | Basta apontar `OPENAI_BASE_URL` para a URL `/v1` do servidor correspondente. |
+| **Pantheon** | `http://127.0.0.1:8081/v1` | **Implementado e testado** | Ambiente de referência (testado em 2x Tesla K80 / SM 3.7 com `Qwen3.6-35B-A3B` a ~20 tok/s). Inclui fallback de status em `/health` e `/models`. |
+| **OpenAI Remota** | `https://api.openai.com/v1` | **Compatível mediante configuração** | Basta configurar `OPENAI_BASE_URL` e `OPENAI_API_KEY`. Suporta `Bearer` token, `stream_options.include_usage`, papel `developer` e `reasoning_effort`. |
+| **Ollama (API `/v1`)** | `http://127.0.0.1:11434/v1` | **Compatível mediante configuração** | Funciona diretamente utilizando a camada de compatibilidade OpenAI do Ollama (`/v1/chat/completions` e `/v1/models`). |
+| **vLLM / llama.cpp (`llama-server`) / LM Studio** | `http://<host>:<porta>/v1` | **Compatível mediante configuração** | Basta apontar `OPENAI_BASE_URL` para a URL `/v1` do servidor correspondente. |
 
 ---
 
@@ -330,6 +323,5 @@ Ao final do stream, `chat.php` persiste no banco de dados o raciocínio encapsul
 ## 12. Limitações Conhecidas
 
 1. **Indicador visual de porta no Frontend:** Os textos informativos da interface (`script.js`) exibem a referência visual `:8081` (porta padrão do ambiente Pantheon local), mesmo quando `OPENAI_BASE_URL` aponta para outra porta ou servidor remoto.
-2. **Gerenciamento de VRAM via UI:** As ações `list_running_models` e `run_model` em `api.php` são stubs que retornam sucesso imediato (`{"models": []}` e `{"success": true}`), pois o protocolo padrão OpenAI `/v1` não define endpoints para carregar/descarregar modelos na VRAM (recurso exclusivo da API nativa do Ollama implementada em `chat-php-ollama`).
+2. **Gerenciamento de VRAM via UI:** As ações `list_running_models` e `run_model` em `api.php` são stubs que retornam sucesso imediato (`{"models": []}` e `{"success": true}`), pois o protocolo padrão OpenAI `/v1` não define endpoints para carregar ou descarregar modelos explicitamente na VRAM.
 3. **RAG Simplificado:** A busca contextual utiliza correspondência lexical (`SQL LIKE`) sobre mensagens anteriores da mesma conversa, não utilizando banco de dados vetorial ou embeddings.
-4. **Script legado `test_ollama.php`:** Mantido por preservação histórica da base compartilhada entre os dois projetos; testa especificamente `OLLAMA_HOST/api/tags` e não o endpoint `/v1/models`.

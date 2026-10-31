@@ -1,4 +1,4 @@
-FROM php:8.2-apache
+FROM php:8.4-apache
 
 # Instala dependências do sistema e extensões do PHP necessárias
 RUN apt-get update && apt-get install -y \
