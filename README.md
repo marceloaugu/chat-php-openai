@@ -78,7 +78,7 @@ chat-php-openai/
 ├── schema.sql          # Esquema SQL de referência (tabelas conversations e messages)
 ├── script.js           # Lógica de frontend, parser de streaming SSE fluido, raciocínio e métricas
 ├── style.css           # Estilização dark mode / Glassmorphism
-└── test_openai.php    # Script utilitário para diagnóstico rápido de conectividade com /v1/models
+└── test_api.php    # Script utilitário para diagnóstico rápido de conectividade com /v1/models
 ```
 
 ---
@@ -183,9 +183,9 @@ A configuração é realizada por variáveis de ambiente lidas diretamente pelo 
 ### Opção A: Servidor Web Local (Apache / XAMPP)
 
 1. Certifique-se de que o Apache, o MySQL/MariaDB e o servidor de inferência compatível com OpenAI (ou Ollama em `/v1`) estejam em execução.
-2. (Opcional) Teste a comunicação direta do PHP com o endpoint `/v1/models` executando no terminal ou abrindo no navegador (`http://localhost/chat-php-openai/test_openai.php`):
+2. (Opcional) Teste a comunicação direta do PHP com o endpoint `/v1/models` executando no terminal ou abrindo no navegador (`http://localhost/chat-php-openai/test_api.php`):
    ```bash
-   php test_openai.php
+   php test_api.php
    ```
 3. Acesse no navegador:
    ```text
@@ -309,7 +309,7 @@ Ao final do stream, `chat.php` persiste no banco de dados o raciocínio encapsul
 
 * **Indicador exibe `Offline` na barra lateral:**
   * Verifique se o servidor compatível com OpenAI está em execução e escutando no endereço definido em `OPENAI_BASE_URL`.
-  * Execute `php test_openai.php` no terminal (ou acesse `http://localhost/chat-php-openai/test_openai.php`) para verificar o código HTTP retornado ao PHP, se a extensão `cURL` está ativa (ou usando o fallback nativo via PHP Streams) e a lista JSON retornada por `/v1/models`.
+  * Execute `php test_api.php` no terminal (ou acesse `http://localhost/chat-php-openai/test_api.php`) para verificar o código HTTP retornado ao PHP, se a extensão `cURL` está ativa (ou usando o fallback nativo via PHP Streams) e a lista JSON retornada por `/v1/models`.
   * Teste manualmente no terminal: `curl http://127.0.0.1:8081/v1/models` (ou a porta correspondente ao seu servidor, como `11434` no Ollama: `curl http://127.0.0.1:11434/v1/models`).
   * Se a aplicação PHP estiver rodando dentro de um container Docker e o servidor de inferência estiver no host, utilize `http://host.docker.internal:<porta>/v1` em vez de `127.0.0.1`.
 * **Erro `Erro ao conectar ou configurar o banco de dados`:**
